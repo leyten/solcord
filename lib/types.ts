@@ -9,6 +9,7 @@ export interface Channel {
   name: string
   type: "text" | "voice" | "trade" | "feed"
   description: string
+  requiredRank?: string
 }
 
 export interface ChannelSection {
@@ -17,15 +18,57 @@ export interface ChannelSection {
 }
 
 export interface User {
+  id: string
   name: string
+  username: string
   avatar: string
+  rank?: string
+}
+
+export interface MessageAttachment {
+  id: string
+  filename: string
+  size: number
+  content_type: string
+  url: string
+  width?: number
+  height?: number
+}
+
+export interface MessageEmbed {
+  type: "link" | "image" | "video"
+  url: string
+  title?: string
+  description?: string
+  thumbnail?: string
+  author?: string
+  site_name?: string
+  width?: number
+  height?: number
+}
+
+export interface MessageReaction {
+  emoji: string
+  count: number
+  users: string[]
+  reacted: boolean
 }
 
 export interface Message {
   id: string
-  text: string
-  timestamp: string
-  user: User
+  channel_id: string
+  server_id: string
+  author_id: string
+  content: string | null
+  message_type: "text" | "image" | "file" | "embed" | "system"
+  attachments?: MessageAttachment[]
+  embeds?: MessageEmbed[]
+  reactions?: MessageReaction[]
+  reply_to?: string
+  edited_at?: string
+  created_at: string
+  updated_at: string
+  author: User
 }
 
 export interface ChannelUser {
@@ -34,4 +77,6 @@ export interface ChannelUser {
   online: boolean
   activity?: string
   lastSeen: string
+  avatar?: string
+  status?: "online" | "dnd" | "offline" // Add status field
 }

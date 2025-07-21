@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { SolcordUI } from "@/components/solcord-ui"
 import { usePrivy } from "@privy-io/react-auth"
-import { createProfile } from "@/app/actions"
+import { createProfile, getProfile, updateUserStatus } from "@/app/actions"
 import { ProfilePictureUpload } from "@/components/profile-picture-upload"
 
 interface LoginFlowProps {
@@ -17,25 +17,49 @@ interface LoginFlowProps {
 type LoginStep = "welcome" | "connect" | "profile"
 
 export function LoginFlow({ onComplete }: LoginFlowProps) {
-  const { ready, authenticated, login, user } = usePrivy()
+  const { ready, authenticated, login, logout, user } = usePrivy()
   const [currentStep, setCurrentStep] = useState<LoginStep>("welcome")
   const [profileState, profileAction, isPending] = useActionState(createProfile, null)
   const [pfpUrl, setPfpUrl] = useState<string>("")
 
   const handleConnect = async () => {
-    if (!authenticated) {
+    try {
       await login()
-    } else {
+      // After successful connection, check if profile exists
+      const existingProfile = await getProfile()
+      if (existingProfile) {
+        onComplete()
+        return
+      }
+      // No profile exists, go to profile creation
       setCurrentStep("profile")
+    } catch (error) {
+      console.log("Connection failed or no existing profile found")
+      // If connection succeeded but no profile, go to profile step
+      if (authenticated) {
+        setCurrentStep("profile")
+      }
     }
   }
 
-  // Auto-advance to profile step if already authenticated
-  React.useEffect(() => {
-    if (ready && authenticated && currentStep === "connect") {
-      setCurrentStep("profile")
+  const handleBackFromProfile = async () => {
+    try {
+      // Set status to offline before logging out
+      console.log("🔄 Setting status to offline before logout from profile setup")
+      try {
+        await updateUserStatus("offline")
+        console.log("✅ Successfully set status to offline before logout")
+      } catch (error) {
+        console.error("❌ Failed to set status to offline before logout:", error)
+        // Continue with logout even if status update fails
+      }
+
+      await logout()
+      setCurrentStep("connect")
+    } catch (error) {
+      console.error("Failed to logout:", error)
     }
-  }, [ready, authenticated, currentStep])
+  }
 
   // Handle successful profile creation
   React.useEffect(() => {
@@ -102,13 +126,22 @@ export function LoginFlow({ onComplete }: LoginFlowProps) {
             </div>
 
             <div className="space-y-3">
-              <Button
-                onClick={handleConnect}
-                disabled={!ready}
-                className="w-full bg-white text-black hover:bg-neutral-200 h-10 rounded-none disabled:bg-neutral-700 disabled:text-neutral-500"
-              >
-                {!ready ? "Loading..." : "Connect Solana Wallet"}
-              </Button>
+              <div className="flex space-x-3">
+                <Button
+                  onClick={() => setCurrentStep("welcome")}
+                  variant="outline"
+                  className="flex-1 border-neutral-600 text-neutral-300 bg-transparent hover:bg-neutral-800 h-10 rounded-none"
+                >
+                  Back
+                </Button>
+                <Button
+                  onClick={handleConnect}
+                  disabled={!ready}
+                  className="flex-1 bg-white text-black hover:bg-neutral-200 h-10 rounded-none disabled:bg-neutral-700 disabled:text-neutral-500"
+                >
+                  {!ready ? "Loading..." : "Connect Solana Wallet"}
+                </Button>
+              </div>
               <p className="text-xs text-neutral-500">Supports Phantom, Solflare, and other Solana wallets</p>
             </div>
           </div>
@@ -120,9 +153,17 @@ export function LoginFlow({ onComplete }: LoginFlowProps) {
             <div className="text-center space-y-2">
               <h2 className="text-xl font-bold text-white">Set Up Your Profile</h2>
               <p className="text-neutral-400">Customize how you appear in the community</p>
-              {user?.wallet?.address && (
+              {user?.linkedAccounts.find((account) => account.type === "wallet" && account.chainType === "solana") && (
                 <p className="text-xs text-neutral-500 font-mono">
-                  Connected: {user.wallet.address.slice(0, 8)}...{user.wallet.address.slice(-8)}
+                  Connected: {(() => {
+                    const wallet = user.linkedAccounts.find(
+                      (account) => account.type === "wallet" && account.chainType === "solana",
+                    )
+                    if (wallet?.type === "wallet") {
+                      return `${wallet.address.slice(0, 8)}...${wallet.address.slice(-8)}`
+                    }
+                    return "Wallet connected"
+                  })()}
                 </p>
               )}
             </div>
@@ -184,12 +225,12 @@ export function LoginFlow({ onComplete }: LoginFlowProps) {
               <div className="flex space-x-3">
                 <Button
                   type="button"
-                  onClick={() => setCurrentStep("connect")}
+                  onClick={handleBackFromProfile}
                   variant="outline"
                   className="flex-1 border-neutral-600 text-neutral-300 bg-transparent hover:bg-neutral-800 h-10 rounded-none"
                   disabled={isPending}
                 >
-                  Back
+                  Disconnect & Back
                 </Button>
                 <Button
                   type="submit"

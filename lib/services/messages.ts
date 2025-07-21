@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/client"
 import type { Message, MessageAttachment, SendMessageData } from "@/lib/types/messages"
 import { extractUrls, generateLinkPreview } from "@/lib/utils/link-preview"
+import { spamPreventionService } from "./spam-prevention"
 
 // Simple compression function since we don't have the library yet
 async function compressImage(file: File): Promise<File> {
@@ -199,9 +200,23 @@ export class OptimizedMessagesService {
     }
   }
 
-  // Send message with optimizations
-  async sendMessage(channelId: string, authorId: string, data: SendMessageData): Promise<Message | null> {
+  // Send message with spam prevention
+  async sendMessage(
+    channelId: string,
+    authorId: string,
+    data: SendMessageData,
+  ): Promise<{ success: boolean; message?: Message; error?: string; cooldownRemaining?: number }> {
     try {
+      // Check spam prevention
+      const spamCheck = spamPreventionService.checkSpam(authorId, data.content || "")
+      if (!spamCheck.allowed) {
+        return {
+          success: false,
+          error: spamCheck.reason,
+          cooldownRemaining: spamCheck.cooldownRemaining,
+        }
+      }
+
       // Generate embeds from URLs in content
       const embeds = data.embeds || []
       if (data.content) {
@@ -230,8 +245,14 @@ export class OptimizedMessagesService {
 
       if (error) {
         console.error("Error sending message:", error)
-        return null
+        return {
+          success: false,
+          error: "Failed to send message",
+        }
       }
+
+      // Record message for spam prevention
+      spamPreventionService.recordMessage(authorId, data.content || "")
 
       // Only clear specific cache entries, not all
       this.clearCacheForChannel(channelId)
@@ -257,7 +278,7 @@ export class OptimizedMessagesService {
         }
       }
 
-      // Return optimistic message (real-time will update with complete data)
+      // Return successful message
       const message: Message = {
         ...newMessage,
         attachments: newMessage.attachments || [],
@@ -272,10 +293,16 @@ export class OptimizedMessagesService {
         },
       }
 
-      return message
+      return {
+        success: true,
+        message,
+      }
     } catch (error) {
       console.error("Error in sendMessage:", error)
-      return null
+      return {
+        success: false,
+        error: "Failed to send message",
+      }
     }
   }
 
@@ -367,6 +394,11 @@ export class OptimizedMessagesService {
       console.error("Error in uploadAttachment:", error)
       return null
     }
+  }
+
+  // Get spam prevention cooldown
+  getSpamCooldown(userId: string): number {
+    return spamPreventionService.getCooldownRemaining(userId)
   }
 
   // Optimized real-time subscription with proper event handling

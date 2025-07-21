@@ -8,8 +8,9 @@ import { UserList } from "@/components/user-list"
 import { Settings } from "@/components/settings"
 import { DirectMessages } from "@/components/direct-messages"
 import { ProfileProvider } from "@/contexts/profile-context"
-import { servers, channelsByServer, usersByChannel } from "@/lib/data"
-import type { Server, Channel } from "@/lib/types"
+import { servers, channelsByServer } from "@/lib/data"
+import type { Server, Channel, ChannelUser } from "@/lib/types"
+import { membersService } from "@/lib/services/members"
 
 export function SolcordUI() {
   const [activeServer, setActiveServer] = useState<Server>(servers[0])
@@ -18,6 +19,40 @@ export function SolcordUI() {
   const [userListCollapsed, setUserListCollapsed] = useState(false)
   const [showDMs, setShowDMs] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [serverMembers, setServerMembers] = useState<ChannelUser[]>([])
+  const [isLoadingMembers, setIsLoadingMembers] = useState(false)
+
+  // Load members when server changes (not channel)
+  useEffect(() => {
+    if (!activeServer?.id) return
+
+    const loadMembers = async () => {
+      setIsLoadingMembers(true)
+      try {
+        console.log("🔄 Loading members for server:", activeServer.name)
+        const members = await membersService.getServerMembers(activeServer.id)
+        console.log("👥 Loaded server members:", members.length, "total")
+        setServerMembers(members)
+      } catch (error) {
+        console.error("❌ Failed to load server members:", error)
+        setServerMembers([])
+      } finally {
+        setIsLoadingMembers(false)
+      }
+    }
+
+    loadMembers()
+
+    // Subscribe to real-time member updates for this server
+    const subscription = membersService.subscribeToMemberUpdates(activeServer.id, (updatedMembers) => {
+      console.log("🔄 Real-time server member update received:", updatedMembers.length, "members")
+      setServerMembers(updatedMembers)
+    })
+
+    return () => {
+      membersService.unsubscribeFromMemberUpdates(subscription)
+    }
+  }, [activeServer.id]) // Only depend on server, not channel
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -32,23 +67,6 @@ export function SolcordUI() {
           setShowDMs(false)
           return
         }
-      }
-
-      // Multiple ways to trigger help - try all of these combinations
-      const isHelpShortcut =
-        (e.ctrlKey || e.metaKey) &&
-        (e.key === "/" || // Standard QWERTY
-          e.key === ":" || // AZERTY with shift
-          e.code === "Slash" || // Physical key position
-          (e.shiftKey && e.code === "Semicolon") || // AZERTY : key
-          e.keyCode === 191 || // Keycode for /
-          (e.shiftKey && e.keyCode === 186)) // Keycode for : on AZERTY
-
-      if (isHelpShortcut) {
-        e.preventDefault()
-        // For now, let's just open settings to test if the key detection works
-        // The help modal is handled by the KeyboardShortcutsHelp component
-        return
       }
 
       // Ctrl/Cmd + K for quick search (focus channel search or open DMs)
@@ -120,91 +138,20 @@ export function SolcordUI() {
         />
         <ChatArea
           channel={activeChannel}
-          messages={[]} // This prop is no longer used since ChatArea loads its own messages
-          users={usersByChannel[activeChannel.id] || []}
+          messages={[]}
+          users={serverMembers}
           onToggleUserList={() => setUserListCollapsed(!userListCollapsed)}
           userListCollapsed={userListCollapsed}
         />
         <UserList
-          users={usersByChannel[activeChannel.id] || []}
+          users={serverMembers}
           collapsed={userListCollapsed}
           onToggleCollapse={() => setUserListCollapsed(!userListCollapsed)}
-          title={activeChannel.type === "voice" ? "Connected Users" : "Members"}
+          title={isLoadingMembers ? "Loading..." : "Members"}
         />
         {showDMs && <DirectMessages onClose={() => setShowDMs(false)} />}
         {showSettings && <Settings onClose={() => setShowSettings(false)} />}
-
-        {/* Keyboard shortcuts help - show on Ctrl/Cmd + / */}
-        <KeyboardShortcutsHelp />
       </div>
     </ProfileProvider>
-  )
-}
-
-function KeyboardShortcutsHelp() {
-  const [showHelp, setShowHelp] = useState(false)
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Multiple ways to trigger help
-      const isHelpShortcut =
-        (e.ctrlKey || e.metaKey) &&
-        (e.key === "/" || // Standard QWERTY
-          e.key === ":" || // AZERTY with shift
-          e.code === "Slash" || // Physical key position
-          (e.shiftKey && e.code === "Semicolon") || // AZERTY : key
-          e.keyCode === 191 || // Keycode for /
-          (e.shiftKey && e.keyCode === 186)) // Keycode for : on AZERTY
-
-      if (isHelpShortcut) {
-        e.preventDefault()
-        setShowHelp(true)
-      }
-
-      if (e.key === "Escape" && showHelp) {
-        setShowHelp(false)
-      }
-    }
-
-    document.addEventListener("keydown", handleKeyDown)
-    return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [showHelp])
-
-  if (!showHelp) return null
-
-  const shortcuts = [
-    { key: "Esc", description: "Close modal or dialog" },
-    { key: "Ctrl/Cmd + K", description: "Open Direct Messages" },
-    { key: "Ctrl/Cmd + ,", description: "Open Settings" },
-    { key: "Ctrl/Cmd + Enter", description: "Send message" },
-    { key: "Ctrl/Cmd + Shift + A", description: "Toggle channel sidebar" },
-    { key: "Ctrl/Cmd + Shift + U", description: "Toggle user list" },
-    { key: "Alt + ↑/↓", description: "Navigate channels" },
-    { key: "Ctrl/Cmd + / or :", description: "Show this help" },
-  ]
-
-  return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
-      <div className="bg-neutral-900 border border-neutral-700 rounded-none w-full max-w-md">
-        <div className="p-4 border-b border-neutral-800">
-          <h3 className="text-lg font-semibold text-neutral-100">Keyboard Shortcuts</h3>
-        </div>
-        <div className="p-4 space-y-3 max-h-64 overflow-y-auto">
-          {shortcuts.map((shortcut, index) => (
-            <div key={index} className="flex items-center justify-between">
-              <span className="text-sm text-neutral-300">{shortcut.description}</span>
-              <kbd className="px-2 py-1 bg-neutral-800 border border-neutral-600 rounded-none text-xs font-mono text-neutral-200">
-                {shortcut.key}
-              </kbd>
-            </div>
-          ))}
-        </div>
-        <div className="p-4 border-t border-neutral-800 text-center">
-          <button onClick={() => setShowHelp(false)} className="text-sm text-neutral-400 hover:text-neutral-200">
-            Press Esc to close
-          </button>
-        </div>
-      </div>
-    </div>
   )
 }

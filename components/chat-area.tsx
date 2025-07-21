@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useEffect, type KeyboardEvent } from "react"
-import { Hash, Send, Paperclip, AtSign, X, Loader2, Reply } from "lucide-react"
+import { Hash, Send, Paperclip, AtSign, X, Loader2, Reply, AlertTriangle, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { VoiceChat } from "@/components/voice-chat"
 import { Feed } from "@/components/feed"
@@ -45,12 +45,12 @@ export function ChatArea({ channel, users }: ChatAreaProps) {
         setMessages(result.messages)
         setHasMore(result.hasMore)
 
-        // Scroll to bottom after messages are loaded
+        // Scroll to bottom immediately after messages are loaded
         setTimeout(() => {
-          if (messagesEndRef.current) {
-            messagesEndRef.current.scrollIntoView({ behavior: "auto" })
+          if (messagesContainerRef.current) {
+            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
           }
-        }, 100)
+        }, 0)
       } catch (error) {
         console.error("Failed to load messages:", error)
         setError("Failed to load messages")
@@ -88,19 +88,12 @@ export function ChatArea({ channel, users }: ChatAreaProps) {
     }
   }, [channel.id])
 
-  // Auto-scroll to bottom on new messages and when loading completes
+  // Auto-scroll to bottom on new messages
   useEffect(() => {
-    if (messagesEndRef.current) {
-      // Use requestAnimationFrame to ensure DOM is updated
-      requestAnimationFrame(() => {
-        if (messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({
-            behavior: isLoading ? "auto" : "smooth",
-          })
-        }
-      })
+    if (messagesContainerRef.current && !isLoading) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
     }
-  }, [messages, isLoading])
+  }, [messages])
 
   // Load more messages when scrolling to top
   const handleScroll = async () => {
@@ -193,7 +186,15 @@ export function ChatArea({ channel, users }: ChatAreaProps) {
       </div>
 
       {/* Messages */}
-      <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 flex flex-col" onScroll={handleScroll}>
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto p-4 flex flex-col custom-scrollbar"
+        onScroll={handleScroll}
+        style={{
+          scrollbarWidth: "thin",
+          scrollbarColor: "#525252 #171717",
+        }}
+      >
         {/* Loading more indicator */}
         {isLoadingMore && (
           <div className="flex justify-center py-4">
@@ -286,6 +287,35 @@ export function ChatArea({ channel, users }: ChatAreaProps) {
           }}
         />
       </div>
+
+      <style jsx>{`
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: #171717;
+          border-radius: 0px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: #525252;
+          border-radius: 0px;
+          border: none;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: #737373;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:active {
+          background: #8a8a8a;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-corner {
+          background: #171717;
+        }
+      `}</style>
     </div>
   )
 }
@@ -300,11 +330,29 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
   const [message, setMessage] = useState("")
   const [showMentions, setShowMentions] = useState(false)
   const [isSending, setIsSending] = useState(false)
+  const [spamError, setSpamError] = useState<string | null>(null)
+  const [cooldownRemaining, setCooldownRemaining] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [attachedFiles, setAttachedFiles] = useState<File[]>([])
   const [uploadingFiles, setUploadingFiles] = useState<boolean>(false)
   const { profile } = useProfile()
+
+  // Cooldown timer
+  useEffect(() => {
+    if (cooldownRemaining > 0) {
+      const timer = setInterval(() => {
+        setCooldownRemaining((prev) => {
+          const newValue = Math.max(0, prev - 1000)
+          if (newValue === 0) {
+            setSpamError(null)
+          }
+          return newValue
+        })
+      }, 1000)
+      return () => clearInterval(timer)
+    }
+  }, [cooldownRemaining])
 
   // Auto-focus and global keydown listener for typing anywhere
   useEffect(() => {
@@ -350,9 +398,11 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
   }
 
   const handleSend = async () => {
-    if ((!message.trim() && attachedFiles.length === 0) || isSending || !profile?.id) return
+    if ((!message.trim() && attachedFiles.length === 0) || isSending || !profile?.id || cooldownRemaining > 0) return
 
     setIsSending(true)
+    setSpamError(null)
+
     try {
       // Upload attachments first
       const attachments = []
@@ -367,27 +417,34 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
         setUploadingFiles(false)
       }
 
-      // Send message
-      const sentMessage = await messagesService.sendMessage(channel.id, profile.id, {
+      // Send message with spam prevention
+      const result = await messagesService.sendMessage(channel.id, profile.id, {
         content: message.trim() || undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
         reply_to: replyingTo?.id,
       })
 
-      if (sentMessage) {
+      if (result.success && result.message) {
         setMessage("")
         setAttachedFiles([])
         if (onMessageSent) {
-          onMessageSent(sentMessage)
+          onMessageSent(result.message)
         }
 
         // Reset textarea height
         if (textareaRef.current) {
           textareaRef.current.style.height = "auto"
         }
+      } else {
+        // Handle spam prevention or other errors
+        setSpamError(result.error || "Failed to send message")
+        if (result.cooldownRemaining) {
+          setCooldownRemaining(result.cooldownRemaining)
+        }
       }
     } catch (error) {
       console.error("Failed to send message:", error)
+      setSpamError("Failed to send message")
     } finally {
       setIsSending(false)
       setUploadingFiles(false)
@@ -397,6 +454,11 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value
     setMessage(value)
+
+    // Clear spam error when user starts typing
+    if (spamError && cooldownRemaining === 0) {
+      setSpamError(null)
+    }
 
     // Auto-resize textarea
     if (textareaRef.current) {
@@ -450,9 +512,26 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
   const filteredUsers = mockUsers.filter((user) => user.toLowerCase().includes(mentionQuery)).slice(0, 5)
 
   const placeholder = replyingTo ? `Reply to ${replyingTo.author.name}...` : `Message #${channel.name}...`
+  const isDisabled = isSending || uploadingFiles || !profile?.id || cooldownRemaining > 0
 
   return (
     <div className="relative">
+      {/* Spam Prevention Warning */}
+      {spamError && (
+        <div className="mb-2 p-3 bg-red-900/20 border border-red-800 rounded-none flex items-center space-x-2">
+          <AlertTriangle className="w-4 h-4 text-red-400 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm text-red-300">{spamError}</p>
+            {cooldownRemaining > 0 && (
+              <div className="flex items-center space-x-1 mt-1">
+                <Clock className="w-3 h-3 text-red-400" />
+                <span className="text-xs text-red-400">Cooldown: {Math.ceil(cooldownRemaining / 1000)}s</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Mentions Dropdown */}
       {showMentions && filteredUsers.length > 0 && (
         <div className="absolute bottom-full left-0 right-0 mb-2 bg-neutral-800 border border-neutral-700 rounded-none max-h-32 overflow-y-auto z-10">
@@ -497,7 +576,11 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
       )}
 
       {/* Input Container */}
-      <div className="bg-neutral-900 border border-neutral-700 rounded-none overflow-hidden">
+      <div
+        className={`bg-neutral-900 border rounded-none overflow-hidden ${
+          spamError ? "border-red-700" : "border-neutral-700"
+        }`}
+      >
         <div className="flex space-x-3 p-3">
           <div className="flex-1 relative flex items-center">
             <Textarea
@@ -505,10 +588,14 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
               value={message}
               onChange={handleInputChange}
               onKeyDown={handleKeyDown}
-              placeholder={placeholder}
+              placeholder={
+                isDisabled && cooldownRemaining > 0
+                  ? `Rate limited - ${Math.ceil(cooldownRemaining / 1000)}s`
+                  : placeholder
+              }
               className="bg-transparent border-none text-neutral-100 placeholder-neutral-500 focus:ring-0 resize-none min-h-[20px] max-h-[120px] rounded-none p-0 text-sm leading-5 w-full"
               rows={1}
-              disabled={isSending || uploadingFiles}
+              disabled={isDisabled}
             />
           </div>
 
@@ -529,7 +616,7 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
               }}
               className="p-2 text-neutral-500 hover:text-neutral-300 rounded-none transition-colors"
               title="Mention someone"
-              disabled={isSending || uploadingFiles}
+              disabled={isDisabled}
             >
               <AtSign className="w-4 h-4" />
             </button>
@@ -538,18 +625,20 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
               onClick={handleFileUpload}
               className="p-2 text-neutral-500 hover:text-neutral-300 rounded-none transition-colors"
               title="Attach file"
-              disabled={isSending || uploadingFiles}
+              disabled={isDisabled}
             >
               <Paperclip className="w-4 h-4" />
             </button>
 
             <Button
               onClick={handleSend}
-              disabled={(!message.trim() && attachedFiles.length === 0) || isSending || uploadingFiles || !profile?.id}
+              disabled={(!message.trim() && attachedFiles.length === 0) || isDisabled}
               className="hover:text-neutral-300 border-0 rounded-none h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed text-neutral-500 bg-transparent px-0.5"
             >
               {isSending || uploadingFiles ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
+              ) : cooldownRemaining > 0 ? (
+                <Clock className="w-4 h-4" />
               ) : (
                 <Send className="w-4 h-4" />
               )}
@@ -566,7 +655,7 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
         onChange={handleFileChange}
         className="hidden"
         accept="image/*,video/*,.pdf,.doc,.docx,.txt"
-        disabled={isSending || uploadingFiles}
+        disabled={isDisabled}
       />
     </div>
   )

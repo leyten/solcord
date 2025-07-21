@@ -10,9 +10,28 @@ interface UserListProps {
   title?: string
 }
 
+const statusColors = {
+  online: "bg-green-500",
+  dnd: "bg-red-500",
+  offline: "bg-neutral-600",
+}
+
 export function UserList({ users, collapsed, onToggleCollapse, title = "Members" }: UserListProps) {
-  const onlineUsers = users.filter((user) => user.online)
-  const offlineUsers = users.filter((user) => !user.online)
+  // Separate users by status - DND users are considered "online" for grouping but with different activity
+  const onlineUsers = users.filter((user) => user.status === "online")
+  const dndUsers = users.filter((user) => user.status === "dnd")
+  const offlineUsers = users.filter((user) => user.status === "offline")
+
+  const activeUsers = [...onlineUsers, ...dndUsers]
+
+  console.log(
+    "👥 UserList render - Online:",
+    onlineUsers.length,
+    "DND:",
+    dndUsers.length,
+    "Offline:",
+    offlineUsers.length,
+  )
 
   if (collapsed) {
     return (
@@ -27,14 +46,25 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
           </button>
         </div>
 
-        {/* Online User Profile Pictures */}
+        {/* Online + DND User Profile Pictures */}
         <div className="flex-1 overflow-y-auto py-2 flex flex-col items-center space-y-2">
-          {onlineUsers.map((user) => (
+          {activeUsers.map((user) => (
             <div key={user.id} className="relative">
-              <div className="w-8 h-8 bg-neutral-700 rounded-none flex items-center justify-center">
-                <span className="text-xs font-bold text-neutral-400">{user.name.charAt(0)}</span>
+              <div className="w-8 h-8 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
+                {user.avatar ? (
+                  <img
+                    src={user.avatar || "/placeholder.svg"}
+                    alt={user.name}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                ) : (
+                  <span className="text-xs font-bold text-neutral-400">{user.name.charAt(0)}</span>
+                )}
               </div>
-              <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-none" />
+              <div
+                className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 ${statusColors[user.status || "offline"]} rounded-none`}
+              />
             </div>
           ))}
         </div>
@@ -48,7 +78,7 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
       <div className="h-12 px-4 flex items-center justify-between border-b border-neutral-800 bg-neutral-900">
         <div className="flex items-center">
           <span className="text-sm font-semibold text-neutral-100">{title}</span>
-          <span className="ml-2 text-xs text-neutral-500">{onlineUsers.length}</span>
+          <span className="ml-2 text-xs text-neutral-500">{users.length}</span>
         </div>
         <button
           onClick={onToggleCollapse}
@@ -60,26 +90,39 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
 
       {/* User List */}
       <div className="flex-1 overflow-y-auto py-2">
-        {/* Online Users */}
-        {onlineUsers.length > 0 && (
+        {/* Online Users (includes DND) */}
+        {activeUsers.length > 0 && (
           <div className="mb-4">
             <div className="px-4 py-1">
               <h3 className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">
-                Online — {onlineUsers.length}
+                Online — {activeUsers.length}
               </h3>
             </div>
             <div className="space-y-0.5">
-              {onlineUsers.map((user) => (
+              {activeUsers.map((user) => (
                 <div key={user.id} className="flex items-center px-4 py-1.5 hover:bg-neutral-850 transition-colors">
                   <div className="relative mr-2 flex-shrink-0">
-                    <div className="w-6 h-6 bg-neutral-700 rounded-none flex items-center justify-center">
-                      <span className="text-xs font-bold text-neutral-400">{user.name.charAt(0)}</span>
+                    <div className="w-6 h-6 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
+                      {user.avatar ? (
+                        <img
+                          src={user.avatar || "/placeholder.svg"}
+                          alt={user.name}
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="text-xs font-bold text-neutral-400">{user.name.charAt(0)}</span>
+                      )}
                     </div>
-                    <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-none" />
+                    <div
+                      className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 ${statusColors[user.status || "offline"]} rounded-none`}
+                    />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm text-neutral-200 truncate">{user.name}</div>
-                    {user.activity && <div className="text-xs text-neutral-500 truncate">{user.activity}</div>}
+                    <div className="text-xs text-neutral-500 truncate">
+                      {user.status === "dnd" ? "Do Not Disturb" : "Active"}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -102,10 +145,19 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
                   className="flex items-center px-4 py-1.5 hover:bg-neutral-850 transition-colors opacity-60"
                 >
                   <div className="relative mr-2 flex-shrink-0">
-                    <div className="w-6 h-6 bg-neutral-800 rounded-none flex items-center justify-center">
-                      <span className="text-xs font-bold text-neutral-500">{user.name.charAt(0)}</span>
+                    <div className="w-6 h-6 bg-neutral-800 rounded-none flex items-center justify-center overflow-hidden">
+                      {user.avatar ? (
+                        <img
+                          src={user.avatar || "/placeholder.svg"}
+                          alt={user.name}
+                          className="w-full h-full object-cover opacity-60"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="text-xs font-bold text-neutral-500">{user.name.charAt(0)}</span>
+                      )}
                     </div>
-                    <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-neutral-600 rounded-none" />
+                    <div className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 ${statusColors.offline} rounded-none`} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm text-neutral-400 truncate">{user.name}</div>
@@ -113,6 +165,15 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Empty State */}
+        {activeUsers.length === 0 && offlineUsers.length === 0 && (
+          <div className="flex-1 flex items-center justify-center text-center text-neutral-500 py-8">
+            <div>
+              <p className="text-sm">No members found</p>
             </div>
           </div>
         )}

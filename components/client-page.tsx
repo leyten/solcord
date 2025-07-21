@@ -4,17 +4,47 @@ import { usePrivy } from "@privy-io/react-auth"
 import { SolcordUI } from "@/components/solcord-ui"
 import { LoginFlow } from "@/components/login-flow"
 import { Button } from "@/components/ui/button"
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { getProfile } from "@/app/actions"
+import { ProfileProvider } from "@/contexts/profile-context"
 
 interface ClientPageProps {
   hasProfile: boolean
 }
 
 export function ClientPage({ hasProfile: initialHasProfile }: ClientPageProps) {
-  const { ready, authenticated, login } = usePrivy()
+  const { ready, authenticated, user, login } = usePrivy()
   const [hasProfile, setHasProfile] = useState(initialHasProfile)
+  const [isCheckingProfile, setIsCheckingProfile] = useState(false)
 
-  if (!ready) {
+  // Get the current wallet address to detect wallet changes
+  const currentWallet = user?.linkedAccounts.find(
+    (account) => account.type === "wallet" && account.chainType === "solana",
+  )
+  const currentWalletAddress = currentWallet?.type === "wallet" ? currentWallet.address : null
+
+  useEffect(() => {
+    const checkExistingProfile = async () => {
+      if (authenticated && ready) {
+        setIsCheckingProfile(true)
+        try {
+          const profile = await getProfile()
+          setHasProfile(!!profile)
+        } catch (error) {
+          console.log("No existing profile found")
+          setHasProfile(false)
+        } finally {
+          setIsCheckingProfile(false)
+        }
+      } else if (!authenticated) {
+        setHasProfile(false)
+      }
+    }
+
+    checkExistingProfile()
+  }, [authenticated, ready, currentWalletAddress]) // Include currentWalletAddress to detect wallet changes
+
+  if (!ready || isCheckingProfile) {
     return (
       <div className="h-screen w-screen flex items-center justify-center bg-neutral-950">
         <div className="text-neutral-400">Loading...</div>
@@ -58,8 +88,16 @@ export function ClientPage({ hasProfile: initialHasProfile }: ClientPageProps) {
   }
 
   if (authenticated && !hasProfile) {
-    return <LoginFlow onComplete={() => setHasProfile(true)} />
+    return (
+      <ProfileProvider>
+        <LoginFlow onComplete={() => setHasProfile(true)} />
+      </ProfileProvider>
+    )
   }
 
-  return <SolcordUI />
+  return (
+    <ProfileProvider>
+      <SolcordUI />
+    </ProfileProvider>
+  )
 }

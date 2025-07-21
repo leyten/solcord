@@ -1,12 +1,12 @@
 "use client"
 
 import { useState, useEffect, useActionState, useRef, useCallback } from "react"
-import { X, Plus, Trash2, Check, AlertCircle, Loader2, Wallet } from "lucide-react"
+import { X, Plus, Trash2, Check, AlertCircle, Loader2, Wallet, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { ProfilePictureUpload } from "@/components/profile-picture-upload"
-import { updateProfile, checkUsernameAvailability } from "@/app/actions"
+import { updateProfile, checkUsernameAvailability, updateUserStatus } from "@/app/actions"
 import { useProfile } from "@/contexts/profile-context"
 import { usePrivy } from "@privy-io/react-auth"
 
@@ -91,7 +91,7 @@ const CONNECTION_LIMIT = 100
 
 export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges }: EditProfileProps) {
   const { profile, isLoading, refreshProfile } = useProfile()
-  const { user, linkWallet, unlinkWallet } = usePrivy()
+  const { user, linkWallet, unlinkWallet, logout } = usePrivy()
   const [name, setName] = useState("")
   const [username, setUsername] = useState("")
   const [usernameStatus, setUsernameStatus] = useState<UsernameStatus>({
@@ -109,6 +109,8 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
   const [isChangingWallet, setIsChangingWallet] = useState(false)
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
 
   const [updateState, updateAction, isUpdating] = useActionState(updateProfile, null)
   const formRef = useRef<HTMLFormElement>(null)
@@ -286,6 +288,29 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
       console.error("Failed to change wallet:", error)
     } finally {
       setIsChangingWallet(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    try {
+      setIsLoggingOut(true)
+
+      // Set status to offline before logging out
+      console.log("🔄 Setting status to offline before logout")
+      try {
+        await updateUserStatus("offline")
+        console.log("✅ Successfully set status to offline before logout")
+      } catch (error) {
+        console.error("❌ Failed to set status to offline before logout:", error)
+        // Continue with logout even if status update fails
+      }
+
+      // Now logout
+      await logout()
+      // The logout will redirect the user automatically
+    } catch (error) {
+      console.error("Failed to logout:", error)
+      setIsLoggingOut(false)
     }
   }
 
@@ -722,6 +747,32 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
                 )}
               </div>
             </div>
+
+            {/* Account Actions */}
+            <div className="pt-4 border-t border-neutral-800">
+              <label className="block text-sm font-medium text-neutral-300 mb-3">Account Actions</label>
+              <div className="space-y-2">
+                <Button
+                  type="button"
+                  onClick={() => setShowLogoutConfirm(true)}
+                  variant="outline"
+                  className="w-full border-red-600 text-red-400 bg-transparent hover:bg-red-600 hover:text-white rounded-none h-9"
+                  disabled={isLoggingOut}
+                >
+                  {isLoggingOut ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Signing Out...
+                    </>
+                  ) : (
+                    <>
+                      <LogOut className="w-4 h-4 mr-2" />
+                      Sign Out
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -765,6 +816,49 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
           >
             {isUpdating ? "Saving..." : "Save Changes"}
           </Button>
+        </div>
+      )}
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-neutral-900 border border-neutral-700 rounded-none w-full max-w-md p-6">
+            <div className="text-center space-y-4">
+              <div className="w-12 h-12 bg-red-600/20 rounded-none flex items-center justify-center mx-auto">
+                <LogOut className="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-neutral-100 mb-2">Sign Out</h3>
+                <p className="text-sm text-neutral-400">
+                  Are you sure you want to sign out? You'll need to reconnect your wallet to access your account again.
+                </p>
+              </div>
+              <div className="flex space-x-3">
+                <Button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  variant="outline"
+                  className="flex-1 border-neutral-600 text-neutral-300 bg-transparent hover:bg-neutral-800 rounded-none"
+                  disabled={isLoggingOut}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={handleLogout}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white rounded-none"
+                  disabled={isLoggingOut}
+                >
+                  {isLoggingOut ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Signing Out...
+                    </>
+                  ) : (
+                    "Sign Out"
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </form>

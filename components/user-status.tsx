@@ -1,10 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { User, Settings, Mic, MicOff } from "lucide-react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useProfile } from "@/contexts/profile-context"
-import { updateUserStatus } from "@/app/actions"
 import { usePrivy } from "@privy-io/react-auth"
 
 interface UserStatusProps {
@@ -33,99 +32,26 @@ const statusConfig = {
 
 export function UserStatus({ onOpenSettings }: UserStatusProps) {
   const [isMuted, setIsMuted] = useState(false)
-  const { profile, isLoading, refreshProfile } = useProfile()
+  const { profile, updateStatus } = useProfile()
   const { authenticated } = usePrivy()
 
-  // Local state for instant UI updates
-  const [localStatus, setLocalStatus] = useState<StatusType | null>(null)
-
-  // Use local status if available, otherwise fall back to profile status
-  const currentStatus = localStatus || (profile?.status as StatusType) || "online"
-
-  // Sync local status with profile when profile changes
-  useEffect(() => {
-    if (profile?.status && !localStatus) {
-      setLocalStatus(profile.status as StatusType)
-    }
-  }, [profile?.status, localStatus])
-
-  // Handle page visibility changes (tab switching, minimizing, etc.)
-  useEffect(() => {
-    if (!authenticated || !profile) return
-
-    const handleVisibilityChange = async () => {
-      if (document.hidden) {
-        // Page is hidden (tab switched, minimized, etc.)
-        if (currentStatus === "online") {
-          setLocalStatus("offline") // Instant UI update
-          try {
-            await updateUserStatus("offline")
-            await refreshProfile()
-          } catch (error) {
-            console.error("Failed to update status to offline:", error)
-            setLocalStatus("online") // Revert on error
-          }
-        }
-      } else {
-        // Page is visible again
-        if (currentStatus === "offline") {
-          setLocalStatus("online") // Instant UI update
-          try {
-            await updateUserStatus("online")
-            await refreshProfile()
-          } catch (error) {
-            console.error("Failed to update status to online:", error)
-            setLocalStatus("offline") // Revert on error
-          }
-        }
-      }
-    }
-
-    // Handle page unload (closing tab/browser)
-    const handleBeforeUnload = async () => {
-      if (currentStatus !== "offline") {
-        // Use navigator.sendBeacon for reliable delivery when page is closing
-        const formData = new FormData()
-        formData.append("status", "offline")
-        navigator.sendBeacon("/api/update-status", formData)
-      }
-    }
-
-    // Set to online when component mounts
-    if (currentStatus === "offline") {
-      setLocalStatus("online") // Instant UI update
-      updateUserStatus("online")
-        .then(() => refreshProfile())
-        .catch((error) => {
-          console.error("Failed to set initial online status:", error)
-          setLocalStatus("offline")
-        })
-    }
-
-    // Add event listeners
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    window.addEventListener("beforeunload", handleBeforeUnload)
-
-    // Cleanup
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-      window.removeEventListener("beforeunload", handleBeforeUnload)
-    }
-  }, [currentStatus, refreshProfile, authenticated, profile])
+  // Use the profile's actual status directly
+  const currentStatus = (profile?.status as StatusType) || "online"
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false)
 
   const handleStatusChange = async (newStatus: StatusType) => {
-    if (newStatus !== currentStatus && authenticated && profile) {
-      // Update UI instantly
-      setLocalStatus(newStatus)
+    if (newStatus !== currentStatus && authenticated && profile && !isUpdatingStatus) {
+      console.log(`🎯 USER CLICKED: Change status from ${currentStatus} to ${newStatus}`)
+      setIsUpdatingStatus(true)
 
-      // Update database in background
       try {
-        await updateUserStatus(newStatus)
-        await refreshProfile()
+        await updateStatus(newStatus)
+        console.log(`✅ Status change completed: ${newStatus}`)
       } catch (error) {
-        console.error("Failed to update status:", error)
-        // Revert local status on error
-        setLocalStatus(currentStatus)
+        console.error("❌ Failed to update status:", error)
+        alert(`Failed to update status: ${error}`)
+      } finally {
+        setIsUpdatingStatus(false)
       }
     }
   }
@@ -159,7 +85,10 @@ export function UserStatus({ onOpenSettings }: UserStatusProps) {
               <div className="text-xs font-medium text-neutral-200 truncate text-left">
                 {profile?.name || profile?.username || "User"}
               </div>
-              <div className="text-xs text-neutral-500 truncate text-left">{statusConfig[currentStatus].label}</div>
+              <div className="text-xs text-neutral-500 truncate text-left">
+                {statusConfig[currentStatus].label}
+                {isUpdatingStatus && " (updating...)"}
+              </div>
             </div>
           </button>
         </DropdownMenuTrigger>
@@ -173,6 +102,7 @@ export function UserStatus({ onOpenSettings }: UserStatusProps) {
               key={key}
               onClick={() => handleStatusChange(key as StatusType)}
               className="hover:bg-neutral-700 cursor-pointer rounded-none flex items-center space-x-3 py-2 focus:bg-neutral-700 focus:text-neutral-100"
+              disabled={isUpdatingStatus}
             >
               <div className={`w-3 h-3 ${config.color} rounded-none flex-shrink-0`} />
               <div className="flex-1">

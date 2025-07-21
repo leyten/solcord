@@ -1,16 +1,16 @@
-import type { Server, ChannelSection, ChannelUser } from "./types"
+import type { Server, ChannelSection } from "./types"
 
-// A single, default server for all users
+// Server data (keeping minimal structure)
 export const servers: Server[] = [
   {
     id: "solcord",
-    name: "SolCord",
+    name: "Solcord",
     logo: "/solcord-logo.png",
   },
 ]
 
-// Default channels for the SolCord server
-export const channelsByServer: { [key: string]: ChannelSection[] } = {
+// Channel structure (keeping existing structure)
+export const channelsByServer: Record<string, ChannelSection[]> = {
   solcord: [
     {
       label: "Feed",
@@ -45,25 +45,6 @@ export const channelsByServer: { [key: string]: ChannelSection[] } = {
           description: "General voice chat",
         },
       ],
-    },
-  ],
-}
-
-// Mock users for channels (you can remove this later when implementing real user lists)
-export const usersByChannel: { [key: string]: ChannelUser[] } = {
-  general: [
-    {
-      id: "1",
-      name: "alice",
-      online: true,
-      activity: "Playing Solana DeFi",
-      lastSeen: "now",
-    },
-    {
-      id: "2",
-      name: "bob",
-      online: false,
-      lastSeen: "2 hours ago",
     },
   ],
 }
