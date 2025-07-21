@@ -2,96 +2,69 @@
 
 import type React from "react"
 
-import { useState, memo, useRef, useEffect } from "react"
-import { format, isToday, isYesterday } from "date-fns"
-import { MoreHorizontal, Reply, Edit, Trash2, Copy, Check, X } from "lucide-react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { useState, useRef, useEffect } from "react"
+import { MoreHorizontal, Reply, Edit, Trash2, Pin, Copy, Flag } from "lucide-react"
 import { MessageAttachments } from "./message-attachments"
 import { MessageEmbeds } from "./message-embeds"
 import { MessageReactions } from "./message-reactions"
-import { Textarea } from "@/components/ui/textarea"
 import type { Message } from "@/lib/types/messages"
 import { useProfile } from "@/contexts/profile-context"
-import { messagesService } from "@/lib/services/messages"
+import { Textarea } from "@/components/ui/textarea"
 
 interface MessageItemProps {
   message: Message
   showAvatar?: boolean
-  isEditing?: boolean
   onReply?: (message: Message) => void
   onEdit?: (message: Message) => void
   onDelete?: (messageId: string) => void
-  onEditSubmit?: (messageId: string, content: string) => void
+  isEditing?: boolean
+  onEditSubmit?: (messageId: string, newContent: string) => void
   onEditCancel?: () => void
+  onUserClick?: (userId: string) => void
 }
 
-export const MessageItem = memo(function MessageItem({
+export function MessageItem({
   message,
   showAvatar = true,
-  isEditing = false,
   onReply,
   onEdit,
   onDelete,
+  isEditing = false,
   onEditSubmit,
   onEditCancel,
+  onUserClick,
 }: MessageItemProps) {
-  const { profile } = useProfile()
-  const [showActions, setShowActions] = useState(false)
-  const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [showMenu, setShowMenu] = useState(false)
   const [editContent, setEditContent] = useState(message.content || "")
-  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const editTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const { profile } = useProfile()
 
   const isOwnMessage = profile?.id === message.author_id
-  const messageDate = new Date(message.created_at)
-  const editedDate = message.edited_at ? new Date(message.edited_at) : null
+  const messageTime = new Date(message.created_at).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 
-  // Fetch replied-to message if this is a reply
+  // Close menu when clicking outside
   useEffect(() => {
-    if (message.reply_to) {
-      messagesService.getMessage(message.reply_to).then((replyMsg) => {
-        if (replyMsg) {
-          setReplyToMessage(replyMsg)
-        }
-      })
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false)
+      }
     }
-  }, [message.reply_to])
 
-  // Auto-focus and resize edit textarea
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  // Focus textarea when editing starts
   useEffect(() => {
     if (isEditing && editTextareaRef.current) {
       editTextareaRef.current.focus()
-      editTextareaRef.current.style.height = "auto"
-      editTextareaRef.current.style.height = `${editTextareaRef.current.scrollHeight}px`
+      editTextareaRef.current.setSelectionRange(editContent.length, editContent.length)
     }
-  }, [isEditing])
-
-  const formatMessageTime = (date: Date) => {
-    if (isToday(date)) {
-      return format(date, "HH:mm")
-    } else if (isYesterday(date)) {
-      return `Yesterday at ${format(date, "HH:mm")}`
-    } else {
-      return format(date, "dd/MM/yyyy HH:mm")
-    }
-  }
-
-  const copyMessageText = () => {
-    if (message.content) {
-      navigator.clipboard.writeText(message.content)
-    }
-  }
-
-  const handleEditKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault()
-      handleEditSubmit()
-    }
-    if (e.key === "Escape") {
-      e.preventDefault()
-      handleEditCancel()
-    }
-  }
+  }, [isEditing, editContent.length])
 
   const handleEditSubmit = () => {
     if (editContent.trim() && onEditSubmit) {
@@ -99,210 +72,194 @@ export const MessageItem = memo(function MessageItem({
     }
   }
 
-  const handleEditCancel = () => {
-    setEditContent(message.content || "")
-    if (onEditCancel) {
-      onEditCancel()
+  const handleEditKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handleEditSubmit()
+    }
+    if (e.key === "Escape") {
+      onEditCancel?.()
     }
   }
 
-  const handleEditChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    setEditContent(e.target.value)
-    // Auto-resize
-    e.target.style.height = "auto"
-    e.target.style.height = `${e.target.scrollHeight}px`
+  const handleUserClick = () => {
+    if (onUserClick) {
+      onUserClick(message.author_id)
+    }
   }
 
-  // Keep actions visible when dropdown is open or when hovering
-  const shouldShowActions = showActions || dropdownOpen
-
   return (
-    <div
-      className={`group relative flex items-start px-4 py-2 mx-[-16px] transition-all duration-150 hover:bg-neutral-900/50`}
-      onMouseEnter={() => setShowActions(true)}
-      onMouseLeave={() => setShowActions(false)}
-    >
-      {/* Avatar or Spacer */}
+    <div className="group flex items-start space-x-3 px-4 py-2 hover:bg-neutral-900/50 transition-colors">
+      {/* Avatar */}
       {showAvatar ? (
-        <div className="w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center flex-shrink-0 mt-0.5 overflow-hidden mr-3">
+        <button
+          onClick={handleUserClick}
+          className="flex-shrink-0 w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden hover:opacity-80 transition-opacity"
+        >
           {message.author.avatar ? (
             <img
               src={message.author.avatar || "/placeholder.svg"}
               alt={message.author.name}
               className="w-full h-full object-cover"
-              loading="lazy"
             />
           ) : (
-            <span className="text-sm font-bold text-neutral-300">{message.author.name.charAt(0).toUpperCase()}</span>
+            <span className="text-sm font-bold text-neutral-400">{message.author.name.charAt(0).toUpperCase()}</span>
           )}
-        </div>
+        </button>
       ) : (
-        <div className="w-10 flex-shrink-0 mr-3" />
+        <div className="w-10 flex-shrink-0 flex justify-center">
+          <span className="text-xs text-neutral-600 opacity-0 group-hover:opacity-100 transition-opacity">
+            {messageTime}
+          </span>
+        </div>
       )}
 
-      {/* Message Content */}
+      {/* Content */}
       <div className="flex-1 min-w-0">
         {/* Header */}
         {showAvatar && (
           <div className="flex items-baseline space-x-2 mb-1">
-            <span className="text-sm font-semibold text-neutral-100 hover:underline cursor-pointer">
+            <button onClick={handleUserClick} className="font-semibold text-neutral-200 hover:underline text-sm">
               {message.author.name}
-            </span>
-            <span className="text-xs text-neutral-500">{formatMessageTime(messageDate)}</span>
-            {message.edited_at && (
-              <span className="text-xs text-neutral-400 bg-neutral-800 px-1.5 py-0.5 rounded-sm">
-                edited {editedDate && formatMessageTime(editedDate)}
-              </span>
-            )}
+            </button>
+            <span className="text-xs text-neutral-500">{messageTime}</span>
+            {message.edited_at && <span className="text-xs text-neutral-600">(edited)</span>}
           </div>
         )}
 
-        {/* Reply Preview */}
-        {replyToMessage && (
-          <div className="flex items-start space-x-2 mb-2 p-2 bg-neutral-800/50 border-l-2 border-neutral-600 rounded-r-sm">
-            <Reply className="w-3 h-3 text-neutral-500 mt-0.5 flex-shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center space-x-2 mb-1">
-                <span className="text-xs font-medium text-neutral-300">{replyToMessage.author.name}</span>
-                <span className="text-xs text-neutral-500">
-                  {formatMessageTime(new Date(replyToMessage.created_at))}
-                </span>
-              </div>
-              {replyToMessage.content && (
-                <div className="text-xs text-neutral-400 line-clamp-2 break-words">
-                  {replyToMessage.content.length > 100
-                    ? `${replyToMessage.content.substring(0, 100)}...`
-                    : replyToMessage.content}
-                </div>
-              )}
-              {replyToMessage.attachments && replyToMessage.attachments.length > 0 && (
-                <div className="text-xs text-neutral-500 italic">
-                  📎 {replyToMessage.attachments.length} attachment(s)
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Text Content or Edit Input */}
+        {/* Message content */}
         {isEditing ? (
           <div className="space-y-2">
             <Textarea
               ref={editTextareaRef}
               value={editContent}
-              onChange={handleEditChange}
+              onChange={(e) => setEditContent(e.target.value)}
               onKeyDown={handleEditKeyDown}
-              className="bg-neutral-800 border-neutral-600 text-neutral-100 text-sm resize-none rounded-none min-h-[60px]"
-              placeholder="Edit your message..."
+              className="bg-neutral-800 border-neutral-700 text-neutral-100 text-sm rounded-none resize-none"
+              rows={3}
             />
-            <div className="flex items-center space-x-2 text-xs text-neutral-500">
-              <span>Press Enter to save • Escape to cancel</span>
-              <div className="flex space-x-1 ml-auto">
-                <button
-                  onClick={handleEditCancel}
-                  className="p-1 text-neutral-500 hover:text-neutral-300 transition-colors"
-                  title="Cancel"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={handleEditSubmit}
-                  className="p-1 text-neutral-500 hover:text-green-400 transition-colors"
-                  title="Save"
-                  disabled={!editContent.trim()}
-                >
-                  <Check className="w-4 h-4" />
-                </button>
-              </div>
+            <div className="flex space-x-2 text-xs">
+              <button
+                onClick={handleEditSubmit}
+                className="text-blue-400 hover:text-blue-300"
+                disabled={!editContent.trim()}
+              >
+                Save
+              </button>
+              <button onClick={onEditCancel} className="text-neutral-500 hover:text-neutral-400">
+                Cancel
+              </button>
             </div>
           </div>
         ) : (
-          message.content && (
-            <div className="text-sm text-neutral-200 leading-relaxed whitespace-pre-wrap break-words">
-              {message.content}
-            </div>
-          )
-        )}
+          <>
+            {message.content && (
+              <div className="text-neutral-300 text-sm leading-relaxed break-words">{message.content}</div>
+            )}
 
-        {/* Attachments */}
-        {message.attachments && message.attachments.length > 0 && (
-          <div className="mt-2">
-            <MessageAttachments attachments={message.attachments} />
-          </div>
-        )}
+            {/* Attachments */}
+            {message.attachments && message.attachments.length > 0 && (
+              <MessageAttachments attachments={message.attachments} />
+            )}
 
-        {/* Embeds */}
-        {message.embeds && message.embeds.length > 0 && (
-          <div className="mt-2">
-            <MessageEmbeds embeds={message.embeds} />
-          </div>
-        )}
+            {/* Embeds */}
+            {message.embeds && message.embeds.length > 0 && <MessageEmbeds embeds={message.embeds} />}
 
-        {/* Reactions */}
-        {message.reactions && message.reactions.length > 0 && (
-          <div className="mt-2">
-            <MessageReactions messageId={message.id} reactions={message.reactions} />
-          </div>
+            {/* Reactions */}
+            {message.reactions && message.reactions.length > 0 && (
+              <MessageReactions reactions={message.reactions} messageId={message.id} />
+            )}
+          </>
         )}
       </div>
 
-      {/* Message Actions - Fixed positioning */}
+      {/* Actions */}
       {!isEditing && (
-        <div
-          className={`absolute top-1 right-4 flex items-center space-x-1 bg-neutral-800 border border-neutral-700 rounded-none shadow-lg transition-opacity duration-150 ${
-            shouldShowActions ? "opacity-100" : "opacity-0 pointer-events-none"
-          }`}
-        >
+        <div className="relative">
           <button
-            onClick={() => onReply?.(message)}
-            className="p-1.5 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700 transition-colors"
-            title="Reply"
+            onClick={() => setShowMenu(!showMenu)}
+            className="opacity-0 group-hover:opacity-100 p-1 text-neutral-500 hover:text-neutral-300 hover:bg-neutral-800 rounded-none transition-all"
           >
-            <Reply className="w-4 h-4" />
+            <MoreHorizontal className="w-4 h-4" />
           </button>
 
-          <DropdownMenu onOpenChange={setDropdownOpen}>
-            <DropdownMenuTrigger asChild>
-              <button className="p-1.5 text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700 transition-colors">
-                <MoreHorizontal className="w-4 h-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="bg-neutral-800 border-neutral-700 text-neutral-100 rounded-none"
+          {/* Context Menu */}
+          {showMenu && (
+            <div
+              ref={menuRef}
+              className="absolute right-0 top-8 bg-neutral-800 border border-neutral-700 rounded-none shadow-lg z-10 min-w-[160px]"
             >
-              <DropdownMenuItem
-                onClick={copyMessageText}
-                className="hover:bg-neutral-700 cursor-pointer rounded-none focus:bg-neutral-700 focus:text-neutral-100"
-                disabled={!message.content}
+              {onReply && (
+                <button
+                  onClick={() => {
+                    onReply(message)
+                    setShowMenu(false)
+                  }}
+                  className="w-full flex items-center px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition-colors"
+                >
+                  <Reply className="w-4 h-4 mr-2" />
+                  Reply
+                </button>
+              )}
+
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(message.content || "")
+                  setShowMenu(false)
+                }}
+                className="w-full flex items-center px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition-colors"
               >
                 <Copy className="w-4 h-4 mr-2" />
                 Copy Text
-              </DropdownMenuItem>
+              </button>
 
-              {isOwnMessage && (
-                <>
-                  <DropdownMenuItem
-                    onClick={() => onEdit?.(message)}
-                    className="hover:bg-neutral-700 cursor-pointer rounded-none focus:bg-neutral-700 focus:text-neutral-100"
-                  >
-                    <Edit className="w-4 h-4 mr-2" />
-                    Edit Message
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    onClick={() => onDelete?.(message.id)}
-                    className="hover:bg-red-600 cursor-pointer rounded-none focus:bg-red-600 focus:text-white text-red-400"
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Delete Message
-                  </DropdownMenuItem>
-                </>
+              {isOwnMessage && onEdit && (
+                <button
+                  onClick={() => {
+                    onEdit(message)
+                    setShowMenu(false)
+                  }}
+                  className="w-full flex items-center px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition-colors"
+                >
+                  <Edit className="w-4 h-4 mr-2" />
+                  Edit
+                </button>
               )}
-            </DropdownMenuContent>
-          </DropdownMenu>
+
+              <button
+                onClick={() => setShowMenu(false)}
+                className="w-full flex items-center px-3 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition-colors"
+              >
+                <Pin className="w-4 h-4 mr-2" />
+                Pin Message
+              </button>
+
+              {!isOwnMessage && (
+                <button
+                  onClick={() => setShowMenu(false)}
+                  className="w-full flex items-center px-3 py-2 text-sm text-red-400 hover:bg-neutral-700 transition-colors"
+                >
+                  <Flag className="w-4 h-4 mr-2" />
+                  Report
+                </button>
+              )}
+
+              {isOwnMessage && onDelete && (
+                <button
+                  onClick={() => {
+                    onDelete(message.id)
+                    setShowMenu(false)
+                  }}
+                  className="w-full flex items-center px-3 py-2 text-sm text-red-400 hover:bg-neutral-700 transition-colors"
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
   )
-})
+}

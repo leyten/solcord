@@ -7,6 +7,7 @@ import { ChatArea } from "@/components/chat-area"
 import { UserList } from "@/components/user-list"
 import { Settings } from "@/components/settings"
 import { DirectMessages } from "@/components/direct-messages"
+import { ProfileView } from "@/components/profile-view"
 import { ProfileProvider } from "@/contexts/profile-context"
 import { servers, channelsByServer } from "@/lib/data"
 import type { Server, Channel, ChannelUser } from "@/lib/types"
@@ -21,6 +22,8 @@ export function SolcordUI() {
   const [showSettings, setShowSettings] = useState(false)
   const [serverMembers, setServerMembers] = useState<ChannelUser[]>([])
   const [isLoadingMembers, setIsLoadingMembers] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<ChannelUser | null>(null)
+  const [showProfileView, setShowProfileView] = useState(false)
 
   // Load members when server changes (not channel)
   useEffect(() => {
@@ -29,9 +32,7 @@ export function SolcordUI() {
     const loadMembers = async () => {
       setIsLoadingMembers(true)
       try {
-        console.log("🔄 Loading members for server:", activeServer.name)
         const members = await membersService.getServerMembers(activeServer.id)
-        console.log("👥 Loaded server members:", members.length, "total")
         setServerMembers(members)
       } catch (error) {
         console.error("❌ Failed to load server members:", error)
@@ -45,7 +46,6 @@ export function SolcordUI() {
 
     // Subscribe to real-time member updates for this server
     const subscription = membersService.subscribeToMemberUpdates(activeServer.id, (updatedMembers) => {
-      console.log("🔄 Real-time server member update received:", updatedMembers.length, "members")
       setServerMembers(updatedMembers)
     })
 
@@ -54,11 +54,33 @@ export function SolcordUI() {
     }
   }, [activeServer.id]) // Only depend on server, not channel
 
+  const handleUserClick = (userId: string) => {
+    const user = serverMembers.find((u) => u.id === userId)
+    if (user) {
+      setSelectedUser(user)
+      setShowProfileView(true)
+    }
+  }
+
+  const handleCloseProfileView = () => {
+    setShowProfileView(false)
+    setSelectedUser(null)
+  }
+
+  const handleOpenSettings = () => {
+    setShowProfileView(false)
+    setShowSettings(true)
+  }
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // ESC to close modals
       if (e.key === "Escape") {
+        if (showProfileView) {
+          setShowProfileView(false)
+          return
+        }
         if (showSettings) {
           setShowSettings(false)
           return
@@ -115,7 +137,7 @@ export function SolcordUI() {
 
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [showSettings, showDMs, channelSidebarCollapsed, userListCollapsed, activeServer, activeChannel])
+  }, [showSettings, showDMs, showProfileView, channelSidebarCollapsed, userListCollapsed, activeServer, activeChannel])
 
   return (
     <ProfileProvider>
@@ -142,15 +164,20 @@ export function SolcordUI() {
           users={serverMembers}
           onToggleUserList={() => setUserListCollapsed(!userListCollapsed)}
           userListCollapsed={userListCollapsed}
+          onOpenSettings={handleOpenSettings}
         />
         <UserList
           users={serverMembers}
           collapsed={userListCollapsed}
           onToggleCollapse={() => setUserListCollapsed(!userListCollapsed)}
           title={isLoadingMembers ? "Loading..." : "Members"}
+          onUserClick={handleUserClick}
         />
         {showDMs && <DirectMessages onClose={() => setShowDMs(false)} />}
         {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+        {showProfileView && (
+          <ProfileView user={selectedUser} onClose={handleCloseProfileView} onOpenSettings={handleOpenSettings} />
+        )}
       </div>
     </ProfileProvider>
   )

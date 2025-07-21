@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { VoiceChat } from "@/components/voice-chat"
 import { Feed } from "@/components/feed"
 import { MessageItem } from "@/components/messages/message-item"
+import { ProfileView } from "@/components/profile-view"
 import type { Channel, ChannelUser } from "@/lib/types"
 import type { Message } from "@/lib/types/messages"
 import { Textarea } from "@/components/ui/textarea"
@@ -19,9 +20,10 @@ interface ChatAreaProps {
   users: ChannelUser[]
   onToggleUserList: () => void
   userListCollapsed: boolean
+  onOpenSettings?: () => void
 }
 
-export function ChatArea({ channel, users }: ChatAreaProps) {
+export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [hasMore, setHasMore] = useState(false)
@@ -29,6 +31,8 @@ export function ChatArea({ channel, users }: ChatAreaProps) {
   const [error, setError] = useState<string | null>(null)
   const [replyingTo, setReplyingTo] = useState<Message | null>(null)
   const [editingMessage, setEditingMessage] = useState<Message | null>(null)
+  const [selectedUser, setSelectedUser] = useState<ChannelUser | null>(null)
+  const [showProfileView, setShowProfileView] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const { profile } = useProfile()
@@ -165,6 +169,19 @@ export function ChatArea({ channel, users }: ChatAreaProps) {
     }
   }
 
+  const handleUserClick = (userId: string) => {
+    const user = users.find((u) => u.id === userId)
+    if (user) {
+      setSelectedUser(user)
+      setShowProfileView(true)
+    }
+  }
+
+  const handleCloseProfileView = () => {
+    setShowProfileView(false)
+    setSelectedUser(null)
+  }
+
   if (channel.type === "voice") {
     return <VoiceChat channel={channel} users={users} />
   }
@@ -247,6 +264,7 @@ export function ChatArea({ channel, users }: ChatAreaProps) {
                   isEditing={editingMessage?.id === message.id}
                   onEditSubmit={handleEditSubmit}
                   onEditCancel={() => setEditingMessage(null)}
+                  onUserClick={handleUserClick}
                 />
               )
             })}
@@ -287,6 +305,11 @@ export function ChatArea({ channel, users }: ChatAreaProps) {
           }}
         />
       </div>
+
+      {/* Profile View Modal - Now with onOpenSettings! */}
+      {showProfileView && (
+        <ProfileView user={selectedUser} onClose={handleCloseProfileView} onOpenSettings={onOpenSettings} />
+      )}
 
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar {

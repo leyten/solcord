@@ -40,7 +40,6 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       setError(null)
       const profileData = await getProfile()
       setProfile(profileData)
-      console.log("🔄 Profile refreshed:", profileData?.name, "status:", profileData?.status)
     } catch (err) {
       setError("Failed to load profile")
       console.error("Error loading profile:", err)
@@ -50,19 +49,15 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   }
 
   const updateProfileData = (newProfile: Profile) => {
-    console.log("🔄 Profile data updated locally:", newProfile.name, "status:", newProfile.status)
     setProfile(newProfile)
   }
 
   const updateStatus = async (status: "online" | "dnd" | "offline") => {
     if (!profile) return
 
-    console.log(`🔄 UPDATING STATUS: ${profile.status} -> ${status}`)
-
     // Optimistic update
     const updatedProfile = { ...profile, status }
     setProfile(updatedProfile)
-    console.log("✅ Optimistic update applied")
 
     try {
       // Update in database
@@ -74,16 +69,11 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         throw new Error(result.error)
       }
 
-      console.log("✅ Status updated in database")
-
       // Force refresh the members list immediately
-      console.log("🔄 Force refreshing members list...")
       await membersService.forceRefreshMembers("solcord")
-      console.log("✅ Members list force refreshed")
 
       // Also refresh profile from database
       await refreshProfile()
-      console.log("✅ Profile refreshed from database")
     } catch (error) {
       console.error("❌ Status update failed:", error)
       // Revert optimistic update
@@ -91,6 +81,91 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
       throw error
     }
   }
+
+  // Handle app visibility changes and page unload
+  useEffect(() => {
+    if (!profile) return
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "visible") {
+        // Page became visible - set to online (unless user manually set to DND)
+        if (profile.status === "offline") {
+          try {
+            await updateStatus("online")
+          } catch (error) {
+            console.error("Failed to set online status on visibility change:", error)
+          }
+        }
+      } else {
+        // Page became hidden - set to offline (unless user is DND)
+        if (profile.status === "online") {
+          try {
+            await updateUserStatus("offline")
+            setProfile({ ...profile, status: "offline" })
+          } catch (error) {
+            console.error("Failed to set offline status on visibility change:", error)
+          }
+        }
+      }
+    }
+
+    const handleBeforeUnload = async () => {
+      // User is closing the app - set to offline
+      if (profile.status !== "offline") {
+        try {
+          // Use sendBeacon for reliable delivery during page unload
+          const formData = new FormData()
+          formData.append("status", "offline")
+
+          if (navigator.sendBeacon) {
+            navigator.sendBeacon("/api/update-status", formData)
+          } else {
+            // Fallback for browsers that don't support sendBeacon
+            await updateUserStatus("offline")
+          }
+        } catch (error) {
+          console.error("Failed to set offline status on page unload:", error)
+        }
+      }
+    }
+
+    const handleFocus = async () => {
+      // Window gained focus - set to online (unless user manually set to DND)
+      if (profile.status === "offline") {
+        try {
+          await updateStatus("online")
+        } catch (error) {
+          console.error("Failed to set online status on focus:", error)
+        }
+      }
+    }
+
+    const handleBlur = async () => {
+      // Window lost focus - set to offline (unless user is DND)
+      if (profile.status === "online") {
+        try {
+          await updateUserStatus("offline")
+          setProfile({ ...profile, status: "offline" })
+        } catch (error) {
+          console.error("Failed to set offline status on blur:", error)
+        }
+      }
+    }
+
+    // Add event listeners
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+    window.addEventListener("beforeunload", handleBeforeUnload)
+    window.addEventListener("focus", handleFocus)
+    window.addEventListener("blur", handleBlur)
+
+    // Cleanup event listeners
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+      window.removeEventListener("beforeunload", handleBeforeUnload)
+      window.removeEventListener("focus", handleFocus)
+      window.removeEventListener("blur", handleBlur)
+    }
+  }, [profile])
 
   useEffect(() => {
     const loadProfileAndSetOnline = async () => {
@@ -102,9 +177,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         const profileData = await getProfile()
         setProfile(profileData)
 
-        // If profile exists and user is not already online, set them online
-        if (profileData && profileData.status !== "online") {
-          console.log("🚀 Profile loaded, setting status to online")
+        // Set user to online when they open the app
+        if (profileData) {
           try {
             await updateUserStatus("online")
             // Update local profile status immediately

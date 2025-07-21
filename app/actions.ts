@@ -34,6 +34,60 @@ export async function getProfile() {
   }
 }
 
+export async function getUserProfile(userId: string) {
+  try {
+    const supabase = await createClient()
+
+    const { data: profile, error } = await supabase.from("profiles").select("*").eq("id", userId).single()
+
+    if (error) {
+      console.error("Error fetching user profile:", error)
+      return null
+    }
+
+    return profile
+  } catch (error) {
+    console.error("Error getting user profile:", error)
+    return null
+  }
+}
+
+export async function searchUsers(searchTerm: string) {
+  try {
+    if (!searchTerm || searchTerm.length < 2) {
+      return []
+    }
+
+    const supabase = await createClient()
+
+    // Use the search function we created
+    const { data: users, error } = await supabase.rpc("search_users", {
+      search_term: searchTerm,
+    })
+
+    if (error) {
+      console.error("Error searching users:", error)
+      return []
+    }
+
+    // Transform the data to match our interface
+    return (
+      users?.map((user: any) => ({
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        wallet: user.primary_wallet,
+        pfp_url: user.pfp_url,
+        status: user.status as "online" | "dnd" | "offline",
+        online: user.status === "online" || user.status === "dnd",
+      })) || []
+    )
+  } catch (error) {
+    console.error("Error searching users:", error)
+    return []
+  }
+}
+
 export async function updateUserStatus(status: "online" | "dnd" | "offline") {
   try {
     const cookieStore = await cookies()

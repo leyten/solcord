@@ -415,7 +415,6 @@ export class OptimizedMessagesService {
       this.subscriptions.get(channelId).unsubscribe()
     }
 
-    console.log("🔄 Setting up real-time subscription for channel:", channelId)
 
     const subscription = this.supabase
       .channel(`messages:${channelId}`)
@@ -428,7 +427,6 @@ export class OptimizedMessagesService {
           filter: `channel_id=eq.${channelId}`,
         },
         async (payload) => {
-          console.log("📨 Real-time INSERT:", payload.new.content?.substring(0, 50))
           if (callbacks.onInsert) {
             const msg = payload.new
             let author = this.authorCache.get(msg.author_id)
@@ -484,7 +482,6 @@ export class OptimizedMessagesService {
           filter: `channel_id=eq.${channelId}`,
         },
         async (payload) => {
-          console.log("✏️ Real-time UPDATE:", payload.new.content?.substring(0, 50))
           if (callbacks.onUpdate) {
             const msg = payload.new
             let author = this.authorCache.get(msg.author_id)
@@ -545,7 +542,6 @@ export class OptimizedMessagesService {
           filter: `channel_id=eq.${channelId}`,
         },
         (payload) => {
-          console.log("🗑️ Real-time DELETE:", payload.old.id)
           if (callbacks.onDelete) {
             // Remove from reply cache
             this.replyCache.delete(payload.old.id)
@@ -554,7 +550,6 @@ export class OptimizedMessagesService {
         },
       )
       .subscribe((status) => {
-        console.log("📡 Subscription status:", status)
       })
 
     this.subscriptions.set(channelId, subscription)
@@ -565,7 +560,6 @@ export class OptimizedMessagesService {
   unsubscribeFromChannel(channelId: string) {
     const subscription = this.subscriptions.get(channelId)
     if (subscription) {
-      console.log("🔌 Unsubscribing from channel:", channelId)
       subscription.unsubscribe()
       this.subscriptions.delete(channelId)
     }

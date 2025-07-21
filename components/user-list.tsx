@@ -8,6 +8,7 @@ interface UserListProps {
   collapsed: boolean
   onToggleCollapse: () => void
   title?: string
+  onUserClick?: (userId: string) => void
 }
 
 const statusColors = {
@@ -16,7 +17,7 @@ const statusColors = {
   offline: "bg-neutral-600",
 }
 
-export function UserList({ users, collapsed, onToggleCollapse, title = "Members" }: UserListProps) {
+export function UserList({ users, collapsed, onToggleCollapse, title = "Members", onUserClick }: UserListProps) {
   // Separate users by status - DND users are considered "online" for grouping but with different activity
   const onlineUsers = users.filter((user) => user.status === "online")
   const dndUsers = users.filter((user) => user.status === "dnd")
@@ -24,14 +25,11 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
 
   const activeUsers = [...onlineUsers, ...dndUsers]
 
-  console.log(
-    "👥 UserList render - Online:",
-    onlineUsers.length,
-    "DND:",
-    dndUsers.length,
-    "Offline:",
-    offlineUsers.length,
-  )
+  const handleUserClick = (user: ChannelUser) => {
+    if (onUserClick) {
+      onUserClick(user.id)
+    }
+  }
 
   if (collapsed) {
     return (
@@ -49,7 +47,11 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
         {/* Online + DND User Profile Pictures */}
         <div className="flex-1 overflow-y-auto py-2 flex flex-col items-center space-y-2">
           {activeUsers.map((user) => (
-            <div key={user.id} className="relative">
+            <button
+              key={user.id}
+              onClick={() => handleUserClick(user)}
+              className="relative hover:opacity-80 transition-opacity"
+            >
               <div className="w-8 h-8 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
                 {user.avatar ? (
                   <img
@@ -65,7 +67,7 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
               <div
                 className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 ${statusColors[user.status || "offline"]} rounded-none`}
               />
-            </div>
+            </button>
           ))}
         </div>
       </div>
@@ -100,7 +102,11 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
             </div>
             <div className="space-y-0.5">
               {activeUsers.map((user) => (
-                <div key={user.id} className="flex items-center px-4 py-1.5 hover:bg-neutral-850 transition-colors">
+                <button
+                  key={user.id}
+                  onClick={() => handleUserClick(user)}
+                  className="w-full flex items-center px-4 py-1.5 hover:bg-neutral-850 transition-colors text-left"
+                >
                   <div className="relative mr-2 flex-shrink-0">
                     <div className="w-6 h-6 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
                       {user.avatar ? (
@@ -124,7 +130,7 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
                       {user.status === "dnd" ? "Do Not Disturb" : "Active"}
                     </div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>
@@ -140,9 +146,10 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
             </div>
             <div className="space-y-0.5">
               {offlineUsers.map((user) => (
-                <div
+                <button
                   key={user.id}
-                  className="flex items-center px-4 py-1.5 hover:bg-neutral-850 transition-colors opacity-60"
+                  onClick={() => handleUserClick(user)}
+                  className="w-full flex items-center px-4 py-1.5 hover:bg-neutral-850 transition-colors opacity-60 text-left"
                 >
                   <div className="relative mr-2 flex-shrink-0">
                     <div className="w-6 h-6 bg-neutral-800 rounded-none flex items-center justify-center overflow-hidden">
@@ -163,7 +170,7 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
                     <div className="text-sm text-neutral-400 truncate">{user.name}</div>
                     <div className="text-xs text-neutral-600">Last seen {user.lastSeen}</div>
                   </div>
-                </div>
+                </button>
               ))}
             </div>
           </div>

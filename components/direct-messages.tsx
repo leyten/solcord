@@ -7,6 +7,8 @@ import { X, Search, MessageCircle, User, Plus, Send, Paperclip } from "lucide-re
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { getUserProfile, searchUsers } from "@/app/actions"
+import { useProfile } from "@/contexts/profile-context"
 
 interface DirectMessagesProps {
   onClose: () => void
@@ -16,6 +18,7 @@ interface DMConversation {
   id: string
   user: {
     name: string
+    username: string
     avatar: string
     online: boolean
     wallet?: string
@@ -39,8 +42,11 @@ interface DMMessage {
 interface UserSearchResult {
   id: string
   name: string
+  username: string
   wallet: string
   online: boolean
+  pfp_url?: string
+  status?: "online" | "dnd" | "offline"
 }
 
 export function DirectMessages({ onClose }: DirectMessagesProps) {
@@ -50,69 +56,48 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
   const [newConversationSearch, setNewConversationSearch] = useState("")
   const [message, setMessage] = useState("")
   const [attachedFiles, setAttachedFiles] = useState<File[]>([])
+  const [searchResults, setSearchResults] = useState<UserSearchResult[]>([])
+  const [isSearching, setIsSearching] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const { profile } = useProfile()
 
-  const [conversations, setConversations] = useState<DMConversation[]>([
-    {
-      id: "1",
-      user: { name: "alice", avatar: "", online: true, wallet: "7xAlice...9kAlice2" },
-      lastMessage: "Hey, how's the trading going?",
-      timestamp: "2m ago",
-      unread: 2,
-    },
-    {
-      id: "2",
-      user: { name: "bob", avatar: "", online: false, wallet: "5xBob...3kBob7" },
-      lastMessage: "Thanks for the tip!",
-      timestamp: "1h ago",
-      unread: 0,
-    },
-  ])
+  // Remove mock data - start with empty conversations and messages
+  const [conversations, setConversations] = useState<DMConversation[]>([])
+  const [messages, setMessages] = useState<{ [key: string]: DMMessage[] }>({})
 
-  const [messages, setMessages] = useState<{ [key: string]: DMMessage[] }>({
-    "1": [
-      {
-        id: "1",
-        text: "Hey, how's the trading going?",
-        timestamp: "2m ago",
-        isOwn: false,
-        user: { name: "alice", avatar: "" },
-      },
-      {
-        id: "2",
-        text: "Pretty good! Just made a nice profit on SOL",
-        timestamp: "1m ago",
-        isOwn: true,
-        user: { name: "You", avatar: "" },
-      },
-    ],
-    "2": [
-      {
-        id: "1",
-        text: "Thanks for the tip!",
-        timestamp: "1h ago",
-        isOwn: false,
-        user: { name: "bob", avatar: "" },
-      },
-    ],
-  })
+  // Search for users when typing in new conversation search
+  useEffect(() => {
+    const searchUsersAsync = async () => {
+      if (newConversationSearch.length < 2) {
+        setSearchResults([])
+        setIsSearching(false)
+        return
+      }
 
-  // Mock user search results
-  const mockUsers: UserSearchResult[] = [
-    { id: "3", name: "charlie", wallet: "9xCharlie...2kChar8", online: true },
-    { id: "4", name: "diana", wallet: "4xDiana...7kDiana1", online: false },
-    { id: "5", name: "eve", wallet: "8xEve...5kEve9", online: true },
-  ]
+      setIsSearching(true)
 
-  const filteredConversations = conversations.filter((conv) =>
-    conv.user.name.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
+      try {
+        console.log("🔍 Searching for users with term:", newConversationSearch)
+        const results = await searchUsers(newConversationSearch)
+        console.log("🔍 Search results:", results)
+        setSearchResults(results)
+      } catch (error) {
+        console.error("Error searching users:", error)
+        setSearchResults([])
+      } finally {
+        setIsSearching(false)
+      }
+    }
 
-  const filteredUsers = mockUsers.filter(
-    (user) =>
-      user.name.toLowerCase().includes(newConversationSearch.toLowerCase()) ||
-      user.wallet.toLowerCase().includes(newConversationSearch.toLowerCase()),
+    const debounceTimer = setTimeout(searchUsersAsync, 300)
+    return () => clearTimeout(debounceTimer)
+  }, [newConversationSearch])
+
+  const filteredConversations = conversations.filter(
+    (conv) =>
+      conv.user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      conv.user.username.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
   const activeConv = conversations.find((conv) => conv.id === activeConversation)
@@ -126,7 +111,7 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
       text: message,
       timestamp: "now",
       isOwn: true,
-      user: { name: "You", avatar: "" },
+      user: { name: "You", avatar: profile?.pfp_url || "" },
     }
 
     setMessages((prev) => ({
@@ -151,7 +136,7 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
     }
   }
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleTextareaKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSendMessage()
@@ -186,23 +171,77 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
     setAttachedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const startNewConversation = (user: UserSearchResult) => {
-    const newConv: DMConversation = {
-      id: user.id,
-      user: { name: user.name, avatar: "", online: user.online, wallet: user.wallet },
-      lastMessage: "Start a conversation...",
-      timestamp: "now",
-      unread: 0,
+  const startNewConversation = async (user: UserSearchResult) => {
+    // Check if conversation already exists
+    const existingConv = conversations.find((conv) => conv.id === user.id)
+    if (existingConv) {
+      setActiveConversation(user.id)
+      setShowNewConversation(false)
+      setNewConversationSearch("")
+      return
     }
 
-    setConversations((prev) => [newConv, ...prev])
-    setActiveConversation(user.id)
-    setShowNewConversation(false)
-    setNewConversationSearch("")
+    // Fetch full user profile
+    try {
+      const userProfile = await getUserProfile(user.id)
+
+      const newConv: DMConversation = {
+        id: user.id,
+        user: {
+          name: userProfile?.name || user.name,
+          username: userProfile?.username || user.username,
+          avatar: userProfile?.pfp_url || "",
+          online: user.status === "online" || user.status === "dnd",
+          wallet: userProfile?.primary_wallet || user.wallet,
+        },
+        lastMessage: "Start a conversation...",
+        timestamp: "now",
+        unread: 0,
+      }
+
+      setConversations((prev) => [newConv, ...prev])
+      setActiveConversation(user.id)
+      setShowNewConversation(false)
+      setNewConversationSearch("")
+    } catch (error) {
+      console.error("Error fetching user profile:", error)
+      // Fallback to basic user info
+      const newConv: DMConversation = {
+        id: user.id,
+        user: {
+          name: user.name,
+          username: user.username,
+          avatar: user.pfp_url || "",
+          online: user.status === "online" || user.status === "dnd",
+          wallet: user.wallet,
+        },
+        lastMessage: "Start a conversation...",
+        timestamp: "now",
+        unread: 0,
+      }
+
+      setConversations((prev) => [newConv, ...prev])
+      setActiveConversation(user.id)
+      setShowNewConversation(false)
+      setNewConversationSearch("")
+    }
+  }
+
+  const getStatusColor = (status?: string) => {
+    switch (status) {
+      case "online":
+        return "bg-green-500"
+      case "dnd":
+        return "bg-red-500"
+      case "offline":
+        return "bg-gray-500"
+      default:
+        return "bg-gray-500"
+    }
   }
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       // ESC to close new conversation modal first, then DM window
       if (e.key === "Escape") {
         if (showNewConversation) {
@@ -210,6 +249,7 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
           setNewConversationSearch("")
           return
         }
+        onClose()
       }
 
       // Ctrl/Cmd + N for new conversation
@@ -235,7 +275,7 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
 
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [showNewConversation, conversations, activeConversation])
+  }, [showNewConversation, conversations, activeConversation, onClose])
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -284,10 +324,18 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
                     }`}
                   >
                     <div className="relative mr-3">
-                      <div className="w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center">
-                        <span className="text-sm font-bold text-neutral-300">
-                          {conv.user.name.charAt(0).toUpperCase()}
-                        </span>
+                      <div className="w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
+                        {conv.user.avatar ? (
+                          <img
+                            src={conv.user.avatar || "/placeholder.svg"}
+                            alt={conv.user.name}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-sm font-bold text-neutral-300">
+                            {conv.user.name.charAt(0).toUpperCase()}
+                          </span>
+                        )}
                       </div>
                       {conv.user.online && (
                         <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-none border border-neutral-900" />
@@ -330,10 +378,18 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
               <div className="h-12 px-4 flex items-center justify-between border-b border-neutral-800 bg-neutral-925">
                 <div className="flex items-center">
                   <div className="relative mr-3">
-                    <div className="w-8 h-8 bg-neutral-700 rounded-none flex items-center justify-center">
-                      <span className="text-sm font-bold text-neutral-300">
-                        {activeConv?.user.name.charAt(0).toUpperCase()}
-                      </span>
+                    <div className="w-8 h-8 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
+                      {activeConv?.user.avatar ? (
+                        <img
+                          src={activeConv.user.avatar || "/placeholder.svg"}
+                          alt={activeConv.user.name}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-sm font-bold text-neutral-300">
+                          {activeConv?.user.name.charAt(0).toUpperCase()}
+                        </span>
+                      )}
                     </div>
                     {activeConv?.user.online && (
                       <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-none" />
@@ -350,20 +406,30 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
 
               {/* Messages */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                {activeMessages.map((msg) => (
-                  <div key={msg.id} className={`flex ${msg.isOwn ? "justify-end" : "justify-start"}`}>
-                    <div
-                      className={`max-w-xs lg:max-w-md px-4 py-2 rounded-none ${
-                        msg.isOwn ? "bg-blue-600 text-white" : "bg-neutral-800 text-neutral-100"
-                      }`}
-                    >
-                      <p className="text-sm">{msg.text}</p>
-                      <p className={`text-xs mt-1 ${msg.isOwn ? "text-blue-200" : "text-neutral-500"}`}>
-                        {msg.timestamp}
-                      </p>
+                {activeMessages.length === 0 ? (
+                  <div className="flex items-center justify-center h-full text-center text-neutral-500">
+                    <div>
+                      <MessageCircle className="w-12 h-12 mx-auto mb-4" />
+                      <h3 className="text-lg font-semibold text-neutral-300">Start the conversation</h3>
+                      <p className="text-sm">Send a message to {activeConv?.user.name}</p>
                     </div>
                   </div>
-                ))}
+                ) : (
+                  activeMessages.map((msg) => (
+                    <div key={msg.id} className={`flex ${msg.isOwn ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-xs lg:max-w-md px-4 py-2 rounded-none ${
+                          msg.isOwn ? "bg-blue-600 text-white" : "bg-neutral-800 text-neutral-100"
+                        }`}
+                      >
+                        <p className="text-sm">{msg.text}</p>
+                        <p className={`text-xs mt-1 ${msg.isOwn ? "text-blue-200" : "text-neutral-500"}`}>
+                          {msg.timestamp}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
 
               {/* File Attachments Preview */}
@@ -399,7 +465,7 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
                         ref={textareaRef}
                         value={message}
                         onChange={handleInputChange}
-                        onKeyDown={handleKeyDown}
+                        onKeyDown={handleTextareaKeyDown}
                         placeholder={`Message ${activeConv?.user.name}...`}
                         className="bg-transparent border-none text-neutral-100 placeholder-neutral-500 focus:ring-0 resize-none min-h-[20px] max-h-[120px] rounded-none p-0 text-sm leading-5 w-full"
                         rows={1}
@@ -459,6 +525,7 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
                   onClick={() => {
                     setShowNewConversation(false)
                     setNewConversationSearch("")
+                    setSearchResults([])
                   }}
                   className="p-2 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
                 >
@@ -478,28 +545,42 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
             </div>
 
             <div className="max-h-64 overflow-y-auto">
-              {newConversationSearch.length > 0 ? (
-                filteredUsers.length > 0 ? (
+              {isSearching ? (
+                <div className="p-8 text-center text-neutral-500">
+                  <div className="animate-spin w-6 h-6 border-2 border-neutral-600 border-t-neutral-300 rounded-full mx-auto mb-2"></div>
+                  <p className="text-sm">Searching users...</p>
+                </div>
+              ) : newConversationSearch.length > 0 ? (
+                searchResults.length > 0 ? (
                   <div className="space-y-1 p-2">
-                    {filteredUsers.map((user) => (
+                    {searchResults.map((user) => (
                       <button
                         key={user.id}
                         onClick={() => startNewConversation(user)}
                         className="w-full flex items-center p-3 hover:bg-neutral-800 transition-colors text-left"
                       >
                         <div className="relative mr-3">
-                          <div className="w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center">
-                            <span className="text-sm font-bold text-neutral-300">
-                              {user.name.charAt(0).toUpperCase()}
-                            </span>
+                          <div className="w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
+                            {user.pfp_url ? (
+                              <img
+                                src={user.pfp_url || "/placeholder.svg"}
+                                alt={user.name}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-sm font-bold text-neutral-300">
+                                {user.name.charAt(0).toUpperCase()}
+                              </span>
+                            )}
                           </div>
-                          {user.online && (
-                            <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-none border border-neutral-900" />
-                          )}
+                          <div
+                            className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 ${getStatusColor(user.status)} rounded-none border border-neutral-900`}
+                          />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-semibold text-neutral-100">{user.name}</div>
-                          <div className="text-xs text-neutral-400 font-mono truncate">{user.wallet}</div>
+                          <div className="text-xs text-neutral-400">@{user.username}</div>
+                          <div className="text-xs text-neutral-500 font-mono truncate">{user.wallet}</div>
                         </div>
                       </button>
                     ))}
