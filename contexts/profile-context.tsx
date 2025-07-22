@@ -3,7 +3,6 @@
 import type React from "react"
 import { createContext, useContext, useState, useEffect } from "react"
 import { getProfile, updateUserStatus } from "@/app/actions"
-import { membersService } from "@/lib/services/members"
 
 interface Profile {
   id: string
@@ -55,6 +54,8 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
   const updateStatus = async (status: "online" | "dnd" | "offline") => {
     if (!profile) return
 
+    console.log(`🔄 Updating status from ${profile.status} to ${status}`)
+
     // Optimistic update
     const updatedProfile = { ...profile, status }
     setProfile(updatedProfile)
@@ -69,10 +70,12 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         throw new Error(result.error)
       }
 
-      // Force refresh the members list immediately
-      await membersService.forceRefreshMembers("solcord")
+      console.log(`✅ Status updated successfully in database: ${status}`)
 
-      // Also refresh profile from database
+      // The real-time subscription will handle updating the members list automatically
+      // No need to force refresh anymore since we have real-time updates
+
+      // Also refresh profile from database to ensure consistency
       await refreshProfile()
     } catch (error) {
       console.error("❌ Status update failed:", error)
@@ -82,88 +85,82 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // Set user offline when closing browser/tab
+  const setOfflineOnExit = () => {
+    if (profile && profile.status !== "offline") {
+      console.log("🚪 Browser/tab closing, setting status to offline")
+
+      // Use sendBeacon for reliable delivery during page unload
+      const formData = new FormData()
+      formData.append("status", "offline")
+
+      if (navigator.sendBeacon) {
+        const success = navigator.sendBeacon("/api/update-status", formData)
+        console.log(`📡 SendBeacon result: ${success}`)
+      } else {
+        // Fallback - make synchronous request (less reliable but better than nothing)
+        try {
+          const xhr = new XMLHttpRequest()
+          xhr.open("POST", "/api/update-status", false) // synchronous
+          xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
+          xhr.send("status=offline")
+          console.log("📡 Fallback XHR request sent")
+        } catch (error) {
+          console.error("Failed to send fallback request:", error)
+        }
+      }
+    }
+  }
+
   // Handle app visibility changes and page unload
   useEffect(() => {
     if (!profile) return
 
     const handleVisibilityChange = async () => {
+      console.log(`👁️ Visibility changed: ${document.visibilityState}`)
+
       if (document.visibilityState === "visible") {
         // Page became visible - set to online (unless user manually set to DND)
         if (profile.status === "offline") {
           try {
+            console.log("📱 Page became visible, setting status to online")
             await updateStatus("online")
           } catch (error) {
             console.error("Failed to set online status on visibility change:", error)
           }
         }
-      } else {
-        // Page became hidden - set to offline (unless user is DND)
-        if (profile.status === "online") {
-          try {
-            await updateUserStatus("offline")
-            setProfile({ ...profile, status: "offline" })
-          } catch (error) {
-            console.error("Failed to set offline status on visibility change:", error)
-          }
-        }
       }
+      // Don't set offline on visibility hidden - could be file dialogs, other windows, etc.
     }
 
-    const handleBeforeUnload = async () => {
-      // User is closing the app - set to offline
-      if (profile.status !== "offline") {
-        try {
-          // Use sendBeacon for reliable delivery during page unload
-          const formData = new FormData()
-          formData.append("status", "offline")
-
-          if (navigator.sendBeacon) {
-            navigator.sendBeacon("/api/update-status", formData)
-          } else {
-            // Fallback for browsers that don't support sendBeacon
-            await updateUserStatus("offline")
-          }
-        } catch (error) {
-          console.error("Failed to set offline status on page unload:", error)
-        }
-      }
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      console.log("🚨 beforeunload event triggered - tab/browser closing")
+      setOfflineOnExit()
+      // Don't prevent the unload, just set status
     }
 
-    const handleFocus = async () => {
-      // Window gained focus - set to online (unless user manually set to DND)
-      if (profile.status === "offline") {
-        try {
-          await updateStatus("online")
-        } catch (error) {
-          console.error("Failed to set online status on focus:", error)
-        }
-      }
+    const handleUnload = () => {
+      console.log("🚨 unload event triggered - tab/browser closing")
+      setOfflineOnExit()
     }
 
-    const handleBlur = async () => {
-      // Window lost focus - set to offline (unless user is DND)
-      if (profile.status === "online") {
-        try {
-          await updateUserStatus("offline")
-          setProfile({ ...profile, status: "offline" })
-        } catch (error) {
-          console.error("Failed to set offline status on blur:", error)
-        }
-      }
+    const handlePageHide = () => {
+      console.log("🚨 pagehide event triggered - tab/browser closing")
+      setOfflineOnExit()
     }
 
-    // Add event listeners
+    // Only add the events that actually indicate tab/browser closing
     document.addEventListener("visibilitychange", handleVisibilityChange)
     window.addEventListener("beforeunload", handleBeforeUnload)
-    window.addEventListener("focus", handleFocus)
-    window.addEventListener("blur", handleBlur)
+    window.addEventListener("unload", handleUnload)
+    window.addEventListener("pagehide", handlePageHide)
 
     // Cleanup event listeners
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange)
       window.removeEventListener("beforeunload", handleBeforeUnload)
-      window.removeEventListener("focus", handleFocus)
-      window.removeEventListener("blur", handleBlur)
+      window.removeEventListener("unload", handleUnload)
+      window.removeEventListener("pagehide", handlePageHide)
     }
   }, [profile])
 
@@ -180,6 +177,7 @@ export function ProfileProvider({ children }: { children: React.ReactNode }) {
         // Set user to online when they open the app
         if (profileData) {
           try {
+            console.log("🚀 App loaded, setting initial status to online")
             await updateUserStatus("online")
             // Update local profile status immediately
             setProfile({ ...profileData, status: "online" })

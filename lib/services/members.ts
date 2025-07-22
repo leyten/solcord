@@ -8,17 +8,18 @@ class MembersService {
   private subscriptions = new Map<string, RealtimeChannel>()
   private memberCache = new Map<string, ChannelUser[]>()
   private subscriberCallbacks = new Map<string, (members: ChannelUser[]) => void>()
-  private reconnectAttempts = new Map<string, number>()
 
   async getServerMembers(serverId: string): Promise<ChannelUser[]> {
     try {
+      console.log(`👥 Fetching server members for: ${serverId}`)
+
       const { data: profiles, error } = await supabase
         .from("profiles")
         .select("id, username, name, pfp_url, status, updated_at")
         .order("name")
 
       if (error) {
-        console.error("Error fetching server members:", error)
+        console.error("❌ Error fetching server members:", error)
         return []
       }
 
@@ -32,17 +33,20 @@ class MembersService {
         status: profile.status || "offline",
       }))
 
+      console.log(`✅ Fetched ${members.length} members, online: ${members.filter((m) => m.online).length}`)
+
       // Cache the members
       this.memberCache.set(serverId, members)
       return members
     } catch (error) {
-      console.error("Failed to fetch server members:", error)
+      console.error("❌ Failed to fetch server members:", error)
       return []
     }
   }
 
   // Force refresh members and notify all subscribers
   async forceRefreshMembers(serverId: string): Promise<ChannelUser[]> {
+    console.log(`🔄 Force refreshing members for server: ${serverId}`)
     const members = await this.getServerMembers(serverId)
 
     // Notify all active subscriptions for this server
@@ -54,11 +58,13 @@ class MembersService {
   private notifySubscribers(serverId: string, members: ChannelUser[]) {
     const callback = this.subscriberCallbacks.get(serverId)
     if (callback) {
+      console.log(`📢 Notifying subscribers for server ${serverId} with ${members.length} members`)
       callback(members)
     }
   }
 
   subscribeToMemberUpdates(serverId: string, callback: (members: ChannelUser[]) => void): RealtimeChannel {
+    console.log(`🔌 Setting up real-time subscription for server members: ${serverId}`)
 
     // Store the callback for manual notifications
     this.subscriberCallbacks.set(serverId, callback)
@@ -66,11 +72,16 @@ class MembersService {
     // Clean up existing subscription if any
     const existingSubscription = this.subscriptions.get(serverId)
     if (existingSubscription) {
+      console.log(`🧹 Cleaning up existing subscription for server: ${serverId}`)
       supabase.removeChannel(existingSubscription)
     }
 
+    // Create unique channel name with timestamp
+    const channelName = `server-members-${serverId}-${Date.now()}`
+    console.log(`📡 Creating real-time channel: ${channelName}`)
+
     const subscription = supabase
-      .channel(`server-members-${serverId}-${Date.now()}`) // Add timestamp to ensure unique channel
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
@@ -79,6 +90,12 @@ class MembersService {
           table: "profiles",
         },
         async (payload: any) => {
+          console.log(`🔄 Real-time profiles change detected:`, {
+            eventType: payload.eventType,
+            userId: payload.new?.id || payload.old?.id,
+            newStatus: payload.new?.status,
+            oldStatus: payload.old?.status,
+          })
 
           // Get fresh data from database
           const updatedMembers = await this.getServerMembers(serverId)
@@ -88,12 +105,16 @@ class MembersService {
         },
       )
       .subscribe((status, err) => {
+        console.log(`📡 Subscription status for ${channelName}:`, status)
+
         if (err) {
+          console.error(`❌ Subscription error for ${channelName}:`, err)
         }
 
         if (status === "SUBSCRIBED") {
-          this.reconnectAttempts.set(serverId, 0)
+          console.log(`✅ Successfully subscribed to member updates for server: ${serverId}`)
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.error(`❌ Subscription failed for server ${serverId}, attempting reconnect...`)
           this.handleReconnect(serverId, callback)
         }
       })
@@ -107,30 +128,26 @@ class MembersService {
   }
 
   private handleReconnect(serverId: string, callback: (members: ChannelUser[]) => void) {
-    const attempts = this.reconnectAttempts.get(serverId) || 0
-    if (attempts < 3) {
-      this.reconnectAttempts.set(serverId, attempts + 1)
+    console.log(`🔄 Attempting to reconnect member subscription for server: ${serverId}`)
 
-      setTimeout(
-        () => {
-          this.subscribeToMemberUpdates(serverId, callback)
-        },
-        2000 * (attempts + 1),
-      ) // Exponential backoff
-    } else {
-      this.setupPeriodicRefresh(serverId, callback)
-    }
+    setTimeout(() => {
+      this.subscribeToMemberUpdates(serverId, callback)
+    }, 2000)
   }
 
   private setupHeartbeat(serverId: string, callback: (members: ChannelUser[]) => void) {
+    console.log(`💓 Setting up heartbeat for server: ${serverId}`)
+
     // Refresh every 30 seconds as a fallback
     const heartbeatInterval = setInterval(async () => {
       const subscription = this.subscriptions.get(serverId)
       if (!subscription) {
+        console.log(`💓 Heartbeat stopped for server ${serverId} - no subscription`)
         clearInterval(heartbeatInterval)
         return
       }
 
+      console.log(`💓 Heartbeat refresh for server: ${serverId}`)
       const members = await this.getServerMembers(serverId)
       callback(members)
     }, 30000)
@@ -139,25 +156,17 @@ class MembersService {
     ;(this.subscriptions.get(serverId) as any)._heartbeatInterval = heartbeatInterval
   }
 
-  private setupPeriodicRefresh(serverId: string, callback: (members: ChannelUser[]) => void) {
-    const refreshInterval = setInterval(async () => {
-      const members = await this.getServerMembers(serverId)
-      callback(members)
-    }, 10000)
-
-    // Store for cleanup
-    ;(this.subscriptions.get(serverId) as any)._refreshInterval = refreshInterval
-  }
-
   unsubscribeFromMemberUpdates(subscription: RealtimeChannel): void {
     if (subscription) {
+      console.log(`🔌 Unsubscribing from member updates`)
 
       // Clean up intervals
       const heartbeatInterval = (subscription as any)._heartbeatInterval
-      const refreshInterval = (subscription as any)._refreshInterval
 
-      if (heartbeatInterval) clearInterval(heartbeatInterval)
-      if (refreshInterval) clearInterval(refreshInterval)
+      if (heartbeatInterval) {
+        console.log(`🧹 Cleaning up heartbeat interval`)
+        clearInterval(heartbeatInterval)
+      }
 
       supabase.removeChannel(subscription)
     }

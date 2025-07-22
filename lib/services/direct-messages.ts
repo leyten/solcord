@@ -2,14 +2,12 @@ import { createClient } from "@/lib/supabase/client"
 
 export interface DMMessage {
   id: string
+  conversation_id: string
   sender_id: string
   recipient_id: string
   content: string
-  message_type: "text" | "image" | "file"
-  attachments?: any[]
-  read_at?: string
   created_at: string
-  updated_at: string
+  read_at?: string
   sender?: {
     id: string
     name: string
@@ -19,15 +17,16 @@ export interface DMMessage {
 }
 
 export interface DMConversation {
-  conversation_id: string
+  id: string
   other_user_id: string
   other_user_name: string
   other_user_username: string
-  other_user_avatar: string
+  other_user_pfp_url: string
   other_user_status: "online" | "dnd" | "offline"
   last_message: string
   last_message_at: string
   unread_count: number
+  created_at: string
 }
 
 export class DirectMessagesService {
@@ -46,23 +45,43 @@ export class DirectMessagesService {
         return []
       }
 
-      return data || []
+      return (data || []).map((conv: any) => ({
+        id: conv.id,
+        other_user_id: conv.other_user_id,
+        other_user_name: conv.other_user_name,
+        other_user_username: conv.other_user_username,
+        other_user_pfp_url: conv.other_user_pfp_url || "",
+        other_user_status: conv.other_user_status as "online" | "dnd" | "offline",
+        last_message: conv.last_message,
+        last_message_at: conv.last_message_at,
+        unread_count: Number(conv.unread_count),
+        created_at: conv.created_at,
+      }))
     } catch (error) {
       console.error("Error in getUserConversations:", error)
       return []
     }
   }
 
-  // Get messages for a conversation between two users
+  // Get messages for a conversation
   async getConversationMessages(userId: string, otherUserId: string, limit = 50): Promise<DMMessage[]> {
     try {
-      // First get messages with a simpler query
+      // First, get or create the conversation to get the conversation_id
+      const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
+        input_user1_id: userId,
+        input_user2_id: otherUserId,
+      })
+
+      if (convError) {
+        console.error("Error getting conversation:", convError)
+        return []
+      }
+
+      // Get messages for this conversation
       const { data: messages, error } = await this.supabase
         .from("direct_messages")
         .select("*")
-        .or(
-          `and(sender_id.eq.${userId},recipient_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},recipient_id.eq.${userId})`,
-        )
+        .eq("conversation_id", conversationId)
         .order("created_at", { ascending: true })
         .limit(limit)
 
@@ -89,14 +108,12 @@ export class DirectMessagesService {
         // Return messages without sender info if profile fetch fails
         return messages.map((msg: any) => ({
           id: msg.id,
+          conversation_id: msg.conversation_id,
           sender_id: msg.sender_id,
           recipient_id: msg.recipient_id,
           content: msg.content,
-          message_type: msg.message_type,
-          attachments: msg.attachments,
-          read_at: msg.read_at,
           created_at: msg.created_at,
-          updated_at: msg.updated_at,
+          read_at: msg.read_at,
         }))
       }
 
@@ -107,14 +124,12 @@ export class DirectMessagesService {
         const senderProfile = profileMap.get(msg.sender_id)
         return {
           id: msg.id,
+          conversation_id: msg.conversation_id,
           sender_id: msg.sender_id,
           recipient_id: msg.recipient_id,
           content: msg.content,
-          message_type: msg.message_type,
-          attachments: msg.attachments,
-          read_at: msg.read_at,
           created_at: msg.created_at,
-          updated_at: msg.updated_at,
+          read_at: msg.read_at,
           sender: senderProfile
             ? {
                 id: senderProfile.id,
@@ -140,8 +155,8 @@ export class DirectMessagesService {
     try {
       // Get or create conversation
       const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
-        user1: senderId,
-        user2: recipientId,
+        input_user1_id: senderId,
+        input_user2_id: recipientId,
       })
 
       if (convError) {
@@ -153,10 +168,10 @@ export class DirectMessagesService {
       const { data: message, error: msgError } = await this.supabase
         .from("direct_messages")
         .insert({
+          conversation_id: conversationId,
           sender_id: senderId,
           recipient_id: recipientId,
           content,
-          message_type: "text",
         })
         .select("*")
         .single()
@@ -173,26 +188,14 @@ export class DirectMessagesService {
         .eq("id", senderId)
         .single()
 
-      // Update conversation's last message
-      await this.supabase
-        .from("dm_conversations")
-        .update({
-          last_message_id: message.id,
-          last_message_at: message.created_at,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", conversationId)
-
       const formattedMessage: DMMessage = {
         id: message.id,
+        conversation_id: message.conversation_id,
         sender_id: message.sender_id,
         recipient_id: message.recipient_id,
         content: message.content,
-        message_type: message.message_type,
-        attachments: message.attachments,
-        read_at: message.read_at,
         created_at: message.created_at,
-        updated_at: message.updated_at,
+        read_at: message.read_at,
         sender: senderProfile
           ? {
               id: senderProfile.id,
@@ -213,10 +216,22 @@ export class DirectMessagesService {
   // Mark messages as read
   async markMessagesAsRead(userId: string, otherUserId: string): Promise<boolean> {
     try {
+      // Get the conversation ID first
+      const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
+        input_user1_id: userId,
+        input_user2_id: otherUserId,
+      })
+
+      if (convError) {
+        console.error("Error getting conversation for read marking:", convError)
+        return false
+      }
+
+      // Mark messages as read for this conversation
       const { error } = await this.supabase
         .from("direct_messages")
         .update({ read_at: new Date().toISOString() })
-        .eq("sender_id", otherUserId)
+        .eq("conversation_id", conversationId)
         .eq("recipient_id", userId)
         .is("read_at", null)
 
@@ -232,7 +247,7 @@ export class DirectMessagesService {
     }
   }
 
-  // Subscribe to new messages for a user (both sent and received)
+  // Subscribe to new messages for a user
   subscribeToUserMessages(userId: string, onMessage: (message: DMMessage) => void) {
     const channelName = `dm_messages_${userId}`
 
@@ -263,14 +278,12 @@ export class DirectMessagesService {
 
           const formattedMessage: DMMessage = {
             id: message.id,
+            conversation_id: message.conversation_id,
             sender_id: message.sender_id,
             recipient_id: message.recipient_id,
             content: message.content,
-            message_type: message.message_type,
-            attachments: message.attachments,
-            read_at: message.read_at,
             created_at: message.created_at,
-            updated_at: message.updated_at,
+            read_at: message.read_at,
             sender: sender
               ? {
                   id: sender.id,
@@ -307,7 +320,7 @@ export class DirectMessagesService {
           event: "*",
           schema: "public",
           table: "dm_conversations",
-          filter: `or(participant_1.eq.${userId},participant_2.eq.${userId})`,
+          filter: `or(participant1_id.eq.${userId},participant2_id.eq.${userId})`,
         },
         () => {
           onUpdate()

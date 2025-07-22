@@ -188,12 +188,11 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
     // Optimistically add message to UI
     const optimisticMessage: DMMessage = {
       id: `temp-${Date.now()}`,
+      conversation_id: "",
       sender_id: profile.id,
       recipient_id: activeConversation,
       content: messageText,
-      message_type: "text",
       created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
       sender: {
         id: profile.id,
         name: profile.name || "You",
@@ -428,9 +427,9 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
                   >
                     <div className="relative mr-3">
                       <div className="w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
-                        {conv.other_user_avatar ? (
+                        {conv.other_user_pfp_url ? (
                           <img
-                            src={conv.other_user_avatar || "/placeholder.svg"}
+                            src={conv.other_user_pfp_url || "/placeholder.svg"}
                             alt={conv.other_user_name}
                             className="w-full h-full object-cover"
                           />
@@ -486,9 +485,9 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
                 <div className="flex items-center">
                   <div className="relative mr-3">
                     <div className="w-8 h-8 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
-                      {activeConv?.other_user_avatar ? (
+                      {activeConv?.other_user_pfp_url ? (
                         <img
-                          src={activeConv.other_user_avatar || "/placeholder.svg"}
+                          src={activeConv.other_user_pfp_url || "/placeholder.svg"}
                           alt={activeConv.other_user_name}
                           className="w-full h-full object-cover"
                         />

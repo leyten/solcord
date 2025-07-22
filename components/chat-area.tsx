@@ -41,11 +41,14 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
   useEffect(() => {
     if (!channel?.id) return
 
+    console.log(`🔄 Loading messages for channel: ${channel.id}`)
+
     const loadMessages = async () => {
       setIsLoading(true)
       setError(null)
       try {
         const result = await messagesService.getChannelMessages(channel.id)
+        console.log(`📥 Loaded ${result.messages.length} messages for ${channel.id}`)
         setMessages(result.messages)
         setHasMore(result.hasMore)
 
@@ -54,7 +57,7 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
           if (messagesContainerRef.current) {
             messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
           }
-        }, 0)
+        }, 100)
       } catch (error) {
         console.error("Failed to load messages:", error)
         setError("Failed to load messages")
@@ -66,38 +69,45 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
     loadMessages()
 
     // Subscribe to real-time updates with proper callbacks
+    console.log(`🔌 Setting up real-time subscription for: ${channel.id}`)
     const subscription = messagesService.subscribeToChannel(channel.id, {
       onInsert: (newMessage) => {
-        console.log("📨 New message received from:", newMessage.author.name)
+        console.log("📨 New message received via real-time:", newMessage.author.name, "->", newMessage.content)
         setMessages((prev) => {
           // Check if message already exists to avoid duplicates
           if (prev.some((msg) => msg.id === newMessage.id)) {
+            console.log("⚠️ Duplicate message detected, skipping")
             return prev
           }
-          return [...prev, newMessage]
+          console.log("✅ Adding new message to state")
+          const newMessages = [...prev, newMessage]
+
+          // Auto-scroll to bottom when new message arrives
+          setTimeout(() => {
+            if (messagesContainerRef.current) {
+              messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+            }
+          }, 50)
+
+          return newMessages
         })
       },
       onUpdate: (updatedMessage) => {
-        console.log("✏️ Message updated by:", updatedMessage.author.name)
+        console.log("✏️ Message updated via real-time:", updatedMessage.author.name)
         setMessages((prev) => prev.map((msg) => (msg.id === updatedMessage.id ? updatedMessage : msg)))
       },
       onDelete: (deletedMessageId) => {
-        console.log("🗑️ Message deleted:", deletedMessageId)
+        console.log("🗑️ Message deleted via real-time:", deletedMessageId)
         setMessages((prev) => prev.filter((msg) => msg.id !== deletedMessageId))
       },
     })
 
+    // Cleanup function - only unsubscribe when component unmounts or channel changes
     return () => {
+      console.log(`🧹 Cleaning up subscription for: ${channel.id}`)
       messagesService.unsubscribeFromChannel(channel.id)
     }
   }, [channel.id])
-
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    if (messagesContainerRef.current && !isLoading) {
-      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
-    }
-  }, [messages])
 
   // Load more messages when scrolling to top
   const handleScroll = async () => {
@@ -294,19 +304,15 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
           channel={channel}
           replyingTo={replyingTo}
           onMessageSent={(message) => {
+            console.log("📤 Message sent callback triggered:", message.content)
             setReplyingTo(null)
-            // Message will be added via real-time subscription, but let's add it optimistically too
-            setMessages((prev) => {
-              if (prev.some((msg) => msg.id === message.id)) {
-                return prev
-              }
-              return [...prev, message]
-            })
+            // Don't add optimistically - let real-time subscription handle it
+            // This prevents duplicate messages
           }}
         />
       </div>
 
-      {/* Profile View Modal - Now with onOpenSettings! */}
+      {/* Profile View Modal */}
       {showProfileView && (
         <ProfileView user={selectedUser} onClose={handleCloseProfileView} onOpenSettings={onOpenSettings} />
       )}
@@ -423,6 +429,8 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
   const handleSend = async () => {
     if ((!message.trim() && attachedFiles.length === 0) || isSending || !profile?.id || cooldownRemaining > 0) return
 
+    console.log(`📤 Attempting to send message: "${message.trim()}" to channel: ${channel.id}`)
+
     setIsSending(true)
     setSpamError(null)
 
@@ -448,6 +456,7 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
       })
 
       if (result.success && result.message) {
+        console.log("✅ Message sent successfully:", result.message.content)
         setMessage("")
         setAttachedFiles([])
         if (onMessageSent) {
@@ -460,6 +469,7 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
         }
       } else {
         // Handle spam prevention or other errors
+        console.error("❌ Failed to send message:", result.error)
         setSpamError(result.error || "Failed to send message")
         if (result.cooldownRemaining) {
           setCooldownRemaining(result.cooldownRemaining)

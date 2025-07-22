@@ -241,20 +241,24 @@ export class OptimizedMessagesService {
         reply_to: data.reply_to || null,
       }
 
+      console.log("📤 Sending message to database:", messageData)
+
       const { data: newMessage, error } = await this.supabase.from("messages").insert(messageData).select("*").single()
 
       if (error) {
-        console.error("Error sending message:", error)
+        console.error("❌ Database error sending message:", error)
         return {
           success: false,
           error: "Failed to send message",
         }
       }
 
+      console.log("✅ Message successfully inserted:", newMessage.id)
+
       // Record message for spam prevention
       spamPreventionService.recordMessage(authorId, data.content || "")
 
-      // Only clear specific cache entries, not all
+      // Clear cache for this channel
       this.clearCacheForChannel(channelId)
 
       // Get or create author info
@@ -401,7 +405,7 @@ export class OptimizedMessagesService {
     return spamPreventionService.getCooldownRemaining(userId)
   }
 
-  // Optimized real-time subscription with proper event handling
+  // COMPLETELY REWRITTEN REAL-TIME SUBSCRIPTION
   subscribeToChannel(
     channelId: string,
     callbacks: {
@@ -412,26 +416,37 @@ export class OptimizedMessagesService {
   ) {
     // Clean up existing subscription
     if (this.subscriptions.has(channelId)) {
+      console.log(`🧹 Cleaning up existing subscription for: ${channelId}`)
       this.subscriptions.get(channelId).unsubscribe()
     }
 
+    console.log(`🔌 Creating NEW subscription for channel: ${channelId}`)
+
+    // Create a completely fresh subscription
+    const channelName = `realtime_messages_${channelId}_${Math.random().toString(36).substring(7)}`
+    console.log(`📡 Using channel name: ${channelName}`)
 
     const subscription = this.supabase
-      .channel(`messages:${channelId}`)
+      .channel(channelName)
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*", // Listen to all events
           schema: "public",
           table: "messages",
           filter: `channel_id=eq.${channelId}`,
         },
         async (payload) => {
-          if (callbacks.onInsert) {
-            const msg = payload.new
-            let author = this.authorCache.get(msg.author_id)
+          console.log(`🔥 REAL-TIME EVENT RECEIVED for ${channelId}:`, payload.eventType, payload)
 
+          if (payload.eventType === "INSERT" && callbacks.onInsert) {
+            const msg = payload.new
+            console.log(`📨 Processing INSERT event:`, msg)
+
+            // Get author info
+            let author = this.authorCache.get(msg.author_id)
             if (!author) {
+              console.log(`👤 Fetching author for: ${msg.author_id}`)
               const { data } = await this.supabase
                 .from("profiles")
                 .select("id, name, username, pfp_url")
@@ -447,6 +462,7 @@ export class OptimizedMessagesService {
                   rank: "Holder",
                 }
                 this.authorCache.set(data.id, author)
+                console.log(`✅ Author cached:`, author)
               }
             }
 
@@ -468,24 +484,18 @@ export class OptimizedMessagesService {
                 author,
               }
 
+              console.log(`🚀 CALLING onInsert callback with message:`, message.content)
               callbacks.onInsert(message)
+            } else {
+              console.error(`❌ No author found for message: ${msg.id}`)
             }
           }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "messages",
-          filter: `channel_id=eq.${channelId}`,
-        },
-        async (payload) => {
-          if (callbacks.onUpdate) {
-            const msg = payload.new
-            let author = this.authorCache.get(msg.author_id)
 
+          if (payload.eventType === "UPDATE" && callbacks.onUpdate) {
+            const msg = payload.new
+            console.log(`✏️ Processing UPDATE event:`, msg)
+
+            let author = this.authorCache.get(msg.author_id)
             if (!author) {
               const { data } = await this.supabase
                 .from("profiles")
@@ -531,25 +541,28 @@ export class OptimizedMessagesService {
               callbacks.onUpdate(message)
             }
           }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "DELETE",
-          schema: "public",
-          table: "messages",
-          filter: `channel_id=eq.${channelId}`,
-        },
-        (payload) => {
-          if (callbacks.onDelete) {
-            // Remove from reply cache
+
+          if (payload.eventType === "DELETE" && callbacks.onDelete) {
+            console.log(`🗑️ Processing DELETE event:`, payload.old.id)
             this.replyCache.delete(payload.old.id)
             callbacks.onDelete(payload.old.id)
           }
         },
       )
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        console.log(`📡 Subscription status for ${channelId}:`, status)
+        if (err) {
+          console.error(`❌ Subscription error for ${channelId}:`, err)
+        }
+        if (status === "SUBSCRIBED") {
+          console.log(`✅ SUCCESSFULLY SUBSCRIBED to real-time updates for ${channelId}`)
+        } else if (status === "CHANNEL_ERROR") {
+          console.error(`❌ CHANNEL ERROR for ${channelId}`)
+        } else if (status === "TIMED_OUT") {
+          console.error(`⏰ SUBSCRIPTION TIMED OUT for ${channelId}`)
+        } else if (status === "CLOSED") {
+          console.log(`🔒 SUBSCRIPTION CLOSED for ${channelId}`)
+        }
       })
 
     this.subscriptions.set(channelId, subscription)
@@ -558,16 +571,22 @@ export class OptimizedMessagesService {
 
   // Clean up subscriptions
   unsubscribeFromChannel(channelId: string) {
+    console.log(`🔌 Unsubscribing from channel: ${channelId}`)
     const subscription = this.subscriptions.get(channelId)
     if (subscription) {
       subscription.unsubscribe()
       this.subscriptions.delete(channelId)
+      console.log(`✅ Successfully unsubscribed from ${channelId}`)
     }
   }
 
   // Clean up all subscriptions
   cleanup() {
-    this.subscriptions.forEach((subscription) => subscription.unsubscribe())
+    console.log(`🧹 Cleaning up all subscriptions`)
+    this.subscriptions.forEach((subscription, channelId) => {
+      console.log(`🔌 Unsubscribing from ${channelId}`)
+      subscription.unsubscribe()
+    })
     this.subscriptions.clear()
     this.messageCache.clear()
     this.replyCache.clear()
