@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { ServerList } from "@/components/server-list"
 import { ChannelSidebar } from "@/components/channel-sidebar"
 import { ChatArea } from "@/components/chat-area"
@@ -12,8 +12,10 @@ import { ProfileProvider } from "@/contexts/profile-context"
 import { servers, channelsByServer } from "@/lib/data"
 import type { Server, Channel, ChannelUser } from "@/lib/types"
 import { membersService } from "@/lib/services/members"
+import { dmService } from "@/lib/services/direct-messages"
+import { useProfile } from "@/contexts/profile-context"
 
-export function SolcordUI() {
+function SolcordUIInner() {
   const [activeServer, setActiveServer] = useState<Server>(servers[0])
   const [activeChannel, setActiveChannel] = useState<Channel>(channelsByServer[activeServer.id][0].channels[0])
   const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
@@ -24,6 +26,8 @@ export function SolcordUI() {
   const [isLoadingMembers, setIsLoadingMembers] = useState(false)
   const [selectedUser, setSelectedUser] = useState<ChannelUser | null>(null)
   const [showProfileView, setShowProfileView] = useState(false)
+  const [unreadDMCount, setUnreadDMCount] = useState(0)
+  const { profile } = useProfile()
 
   // Load members when server changes (not channel)
   useEffect(() => {
@@ -54,6 +58,50 @@ export function SolcordUI() {
     }
   }, [activeServer.id]) // Only depend on server, not channel
 
+  // Load unread DM count - this gets the total from all conversations
+  const loadUnreadDMCount = useCallback(async () => {
+    if (!profile?.id) return
+
+    try {
+      const conversations = await dmService.getUserConversations(profile.id)
+      const totalUnread = conversations.reduce((sum, conv) => sum + conv.unread_count, 0)
+      setUnreadDMCount(totalUnread)
+    } catch (error) {
+      console.error("Failed to load unread DM count:", error)
+    }
+  }, [profile?.id])
+
+  // Set up real-time DM subscription for notifications ONLY when NOT in DMs
+  useEffect(() => {
+    if (!profile?.id) return
+
+    // Load initial unread count
+    loadUnreadDMCount()
+
+    // Only set up notification subscription when NOT viewing DMs
+    if (!showDMs) {
+      dmService.subscribeToMessages(
+        profile.id,
+        (newMessage) => {
+          // Only count as unread if it's not from the current user
+          if (newMessage.sender_id !== profile.id) {
+            setUnreadDMCount((prev) => prev + 1)
+          }
+        },
+        () => {
+          // Refresh unread count when conversations update
+          loadUnreadDMCount()
+        },
+      )
+    }
+
+    return () => {
+      if (!showDMs) {
+        dmService.cleanup()
+      }
+    }
+  }, [profile?.id, showDMs, loadUnreadDMCount])
+
   const handleUserClick = (userId: string) => {
     const user = serverMembers.find((u) => u.id === userId)
     if (user) {
@@ -71,6 +119,22 @@ export function SolcordUI() {
     setShowProfileView(false)
     setShowSettings(true)
   }
+
+  const handleOpenDMs = () => {
+    setShowDMs(true)
+    // Don't clear the count here - let the DM component handle individual conversation clearing
+  }
+
+  const handleCloseDMs = () => {
+    setShowDMs(false)
+    // Refresh unread count when closing DMs to get the updated totals
+    loadUnreadDMCount()
+  }
+
+  // Handle notification updates from the DM component
+  const handleDMNotificationUpdate = useCallback((newCount: number) => {
+    setUnreadDMCount(newCount)
+  }, [])
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -140,45 +204,52 @@ export function SolcordUI() {
   }, [showSettings, showDMs, showProfileView, channelSidebarCollapsed, userListCollapsed, activeServer, activeChannel])
 
   return (
+    <div className="flex h-screen bg-neutral-950">
+      <ServerList
+        servers={servers}
+        activeServer={activeServer}
+        setActiveServer={setActiveServer}
+        setActiveChannel={setActiveChannel}
+        onOpenDMs={handleOpenDMs}
+        unreadDMCount={unreadDMCount}
+      />
+      <ChannelSidebar
+        server={activeServer}
+        channels={channelsByServer[activeServer.id]}
+        activeChannel={activeChannel}
+        setActiveChannel={setActiveChannel}
+        collapsed={channelSidebarCollapsed}
+        onToggleCollapse={() => setChannelSidebarCollapsed(!channelSidebarCollapsed)}
+        onOpenSettings={() => setShowSettings(true)}
+      />
+      <ChatArea
+        channel={activeChannel}
+        messages={[]}
+        users={serverMembers}
+        onToggleUserList={() => setUserListCollapsed(!userListCollapsed)}
+        userListCollapsed={userListCollapsed}
+        onOpenSettings={handleOpenSettings}
+      />
+      <UserList
+        users={serverMembers}
+        collapsed={userListCollapsed}
+        onToggleCollapse={() => setUserListCollapsed(!userListCollapsed)}
+        title={isLoadingMembers ? "Loading..." : "Members"}
+        onUserClick={handleUserClick}
+      />
+      {showDMs && <DirectMessages onClose={handleCloseDMs} onNotificationUpdate={handleDMNotificationUpdate} />}
+      {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+      {showProfileView && (
+        <ProfileView user={selectedUser} onClose={handleCloseProfileView} onOpenSettings={handleOpenSettings} />
+      )}
+    </div>
+  )
+}
+
+export function SolcordUI() {
+  return (
     <ProfileProvider>
-      <div className="flex h-screen bg-neutral-950">
-        <ServerList
-          servers={servers}
-          activeServer={activeServer}
-          setActiveServer={setActiveServer}
-          setActiveChannel={setActiveChannel}
-          onOpenDMs={() => setShowDMs(true)}
-        />
-        <ChannelSidebar
-          server={activeServer}
-          channels={channelsByServer[activeServer.id]}
-          activeChannel={activeChannel}
-          setActiveChannel={setActiveChannel}
-          collapsed={channelSidebarCollapsed}
-          onToggleCollapse={() => setChannelSidebarCollapsed(!channelSidebarCollapsed)}
-          onOpenSettings={() => setShowSettings(true)}
-        />
-        <ChatArea
-          channel={activeChannel}
-          messages={[]}
-          users={serverMembers}
-          onToggleUserList={() => setUserListCollapsed(!userListCollapsed)}
-          userListCollapsed={userListCollapsed}
-          onOpenSettings={handleOpenSettings}
-        />
-        <UserList
-          users={serverMembers}
-          collapsed={userListCollapsed}
-          onToggleCollapse={() => setUserListCollapsed(!userListCollapsed)}
-          title={isLoadingMembers ? "Loading..." : "Members"}
-          onUserClick={handleUserClick}
-        />
-        {showDMs && <DirectMessages onClose={() => setShowDMs(false)} />}
-        {showSettings && <Settings onClose={() => setShowSettings(false)} />}
-        {showProfileView && (
-          <ProfileView user={selectedUser} onClose={handleCloseProfileView} onOpenSettings={handleOpenSettings} />
-        )}
-      </div>
+      <SolcordUIInner />
     </ProfileProvider>
   )
 }

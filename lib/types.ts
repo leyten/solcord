@@ -1,4 +1,5 @@
 export interface Server {
+  icon: any
   id: string
   name: string
   logo: string

@@ -3,10 +3,10 @@
 import { usePrivy } from "@privy-io/react-auth"
 import { SolcordUI } from "@/components/solcord-ui"
 import { LoginFlow } from "@/components/login-flow"
+import { ProfileProvider } from "@/contexts/profile-context"
 import { Button } from "@/components/ui/button"
 import { useState, useEffect } from "react"
 import { getProfile } from "@/app/actions"
-import { ProfileProvider } from "@/contexts/profile-context"
 
 interface ClientPageProps {
   hasProfile: boolean

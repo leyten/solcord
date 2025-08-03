@@ -31,7 +31,8 @@ export interface DMConversation {
 
 export class DirectMessagesService {
   private supabase = createClient()
-  private subscriptions = new Map<string, any>()
+  private messageSubscription: any = null
+  private conversationSubscription: any = null
 
   // Get user's conversations
   async getUserConversations(userId: string): Promise<DMConversation[]> {
@@ -66,6 +67,8 @@ export class DirectMessagesService {
   // Get messages for a conversation
   async getConversationMessages(userId: string, otherUserId: string, limit = 50): Promise<DMMessage[]> {
     try {
+      console.log(`🔍 Getting messages between ${userId} and ${otherUserId}`)
+
       // First, get or create the conversation to get the conversation_id
       const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
         input_user1_id: userId,
@@ -76,6 +79,8 @@ export class DirectMessagesService {
         console.error("Error getting conversation:", convError)
         return []
       }
+
+      console.log(`🔍 Found conversation ID: ${conversationId}`)
 
       // Get messages for this conversation
       const { data: messages, error } = await this.supabase
@@ -89,6 +94,8 @@ export class DirectMessagesService {
         console.error("Error fetching messages:", error)
         return []
       }
+
+      console.log(`🔍 Found ${messages?.length || 0} messages`)
 
       if (!messages || messages.length === 0) {
         return []
@@ -153,6 +160,8 @@ export class DirectMessagesService {
     content: string,
   ): Promise<{ success: boolean; message?: DMMessage; error?: string }> {
     try {
+      console.log("📤 Attempting to send DM:", { senderId, recipientId, content })
+
       // Get or create conversation
       const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
         input_user1_id: senderId,
@@ -163,6 +172,8 @@ export class DirectMessagesService {
         console.error("Error getting/creating conversation:", convError)
         return { success: false, error: "Failed to create conversation" }
       }
+
+      console.log(`📤 Using conversation ID: ${conversationId}`)
 
       // Insert the message
       const { data: message, error: msgError } = await this.supabase
@@ -180,6 +191,8 @@ export class DirectMessagesService {
         console.error("Error sending message:", msgError)
         return { success: false, error: "Failed to send message" }
       }
+
+      console.log("✅ DM successfully inserted:", message.id)
 
       // Get sender profile
       const { data: senderProfile } = await this.supabase
@@ -247,116 +260,98 @@ export class DirectMessagesService {
     }
   }
 
-  // Subscribe to new messages for a user
-  subscribeToUserMessages(userId: string, onMessage: (message: DMMessage) => void) {
-    const channelName = `dm_messages_${userId}`
+  // Subscribe to real-time DM messages for a user
+  subscribeToMessages(userId: string, onMessage: (message: DMMessage) => void, onConversationUpdate: () => void) {
+    console.log("🔌 Setting up DM real-time subscription for user:", userId)
 
-    // Clean up existing subscription
-    if (this.subscriptions.has(channelName)) {
-      this.subscriptions.get(channelName).unsubscribe()
-    }
+    // Clean up existing subscriptions
+    this.cleanup()
 
-    const subscription = this.supabase
+    // Create a unique channel name
+    const channelName = `dm_realtime_${userId}_${Date.now()}`
+    console.log("🔌 Creating channel:", channelName)
+
+    // Subscribe to new DM messages
+    this.messageSubscription = this.supabase
       .channel(channelName)
       .on(
         "postgres_changes",
         {
-          event: "INSERT",
+          event: "*",
           schema: "public",
           table: "direct_messages",
-          filter: `or(sender_id.eq.${userId},recipient_id.eq.${userId})`,
         },
         async (payload) => {
-          const message = payload.new as any
+          console.log("📨 Raw DM real-time event:", payload)
 
-          // Fetch sender info
-          const { data: sender } = await this.supabase
-            .from("profiles")
-            .select("id, name, username, pfp_url")
-            .eq("id", message.sender_id)
-            .single()
+          if (payload.eventType === "INSERT") {
+            const message = payload.new as any
+            console.log("📨 New DM message:", message)
 
-          const formattedMessage: DMMessage = {
-            id: message.id,
-            conversation_id: message.conversation_id,
-            sender_id: message.sender_id,
-            recipient_id: message.recipient_id,
-            content: message.content,
-            created_at: message.created_at,
-            read_at: message.read_at,
-            sender: sender
-              ? {
-                  id: sender.id,
-                  name: sender.name,
-                  username: sender.username,
-                  avatar: sender.pfp_url || "",
-                }
-              : undefined,
+            // Check if this message involves the current user
+            if (message.sender_id === userId || message.recipient_id === userId) {
+              console.log("📨 Message is for current user, processing...")
+
+              // Fetch sender info
+              const { data: sender } = await this.supabase
+                .from("profiles")
+                .select("id, name, username, pfp_url")
+                .eq("id", message.sender_id)
+                .single()
+
+              const formattedMessage: DMMessage = {
+                id: message.id,
+                conversation_id: message.conversation_id,
+                sender_id: message.sender_id,
+                recipient_id: message.recipient_id,
+                content: message.content,
+                created_at: message.created_at,
+                read_at: message.read_at,
+                sender: sender
+                  ? {
+                      id: sender.id,
+                      name: sender.name,
+                      username: sender.username,
+                      avatar: sender.pfp_url || "",
+                    }
+                  : undefined,
+              }
+
+              console.log("📨 Formatted message:", formattedMessage)
+              onMessage(formattedMessage)
+              onConversationUpdate() // Update conversation list
+            } else {
+              console.log("📨 Message not for current user, ignoring")
+            }
+          } else if (payload.eventType === "UPDATE") {
+            console.log("📝 DM message updated (read status)")
+            onConversationUpdate() // Update conversation list for read status
           }
-
-          onMessage(formattedMessage)
         },
       )
-      .subscribe()
+      .subscribe((status) => {
+        console.log("🔌 DM messages subscription status:", status)
+        if (status === "SUBSCRIBED") {
+          console.log("✅ DM real-time subscription active!")
+        } else if (status === "CHANNEL_ERROR") {
+          console.error("❌ DM subscription error")
+        }
+      })
 
-    this.subscriptions.set(channelName, subscription)
-    return subscription
-  }
-
-  // Subscribe to conversation updates
-  subscribeToConversations(userId: string, onUpdate: () => void) {
-    const channelName = `dm_conversations_${userId}`
-
-    // Clean up existing subscription
-    if (this.subscriptions.has(channelName)) {
-      this.subscriptions.get(channelName).unsubscribe()
-    }
-
-    const subscription = this.supabase
-      .channel(channelName)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "dm_conversations",
-          filter: `or(participant1_id.eq.${userId},participant2_id.eq.${userId})`,
-        },
-        () => {
-          onUpdate()
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "direct_messages",
-        },
-        () => {
-          // Also update conversations when messages change
-          onUpdate()
-        },
-      )
-      .subscribe()
-
-    this.subscriptions.set(channelName, subscription)
-    return subscription
+    return this.messageSubscription
   }
 
   // Clean up subscriptions
-  unsubscribe(channelName: string) {
-    const subscription = this.subscriptions.get(channelName)
-    if (subscription) {
-      subscription.unsubscribe()
-      this.subscriptions.delete(channelName)
-    }
-  }
-
-  // Clean up all subscriptions
   cleanup() {
-    this.subscriptions.forEach((subscription) => subscription.unsubscribe())
-    this.subscriptions.clear()
+    console.log("🧹 Cleaning up DM subscriptions")
+    if (this.messageSubscription) {
+      this.messageSubscription.unsubscribe()
+      this.messageSubscription = null
+    }
+    if (this.conversationSubscription) {
+      this.conversationSubscription.unsubscribe()
+      this.conversationSubscription = null
+    }
   }
 }
 

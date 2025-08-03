@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useRef, type KeyboardEvent, useEffect, useCallback } from "react"
+import { useState, useRef, type KeyboardEvent, useEffect, useCallback, useMemo } from "react"
 import { X, Search, MessageCircle, User, Plus, Send, Paperclip } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -13,6 +13,7 @@ import { dmService, type DMMessage, type DMConversation } from "@/lib/services/d
 
 interface DirectMessagesProps {
   onClose: () => void
+  onNotificationUpdate: (count: number) => void
 }
 
 interface UserSearchResult {
@@ -25,7 +26,7 @@ interface UserSearchResult {
   status?: "online" | "dnd" | "offline"
 }
 
-export function DirectMessages({ onClose }: DirectMessagesProps) {
+export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessagesProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [activeConversation, setActiveConversation] = useState<string | null>(null)
   const [showNewConversation, setShowNewConversation] = useState(false)
@@ -38,6 +39,7 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const { profile } = useProfile()
 
   // Real DM data
@@ -46,7 +48,46 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
   const [isLoadingConversations, setIsLoadingConversations] = useState(true)
   const [isLoadingMessages, setIsLoadingMessages] = useState(false)
 
-  // Load conversations function
+  // Use ref to track active conversation for callbacks without causing re-subscriptions
+  const activeConversationRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    activeConversationRef.current = activeConversation
+  }, [activeConversation])
+
+  // Memoize filtered conversations to prevent unnecessary re-renders
+  const filteredConversations = useMemo(() => {
+    return conversations.filter(
+      (conv) =>
+        conv.other_user_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        conv.other_user_username.toLowerCase().includes(searchQuery.toLowerCase()),
+    )
+  }, [conversations, searchQuery])
+
+  // Memoize active conversation to prevent unnecessary re-renders
+  const activeConv = useMemo(() => {
+    return conversations.find((conv) => conv.other_user_id === activeConversation)
+  }, [conversations, activeConversation])
+
+  // Memoize active messages to prevent unnecessary re-renders
+  const activeMessages = useMemo(() => {
+    return activeConversation ? messages[activeConversation] || [] : []
+  }, [messages, activeConversation])
+
+  // Function to scroll to bottom instantly
+  const scrollToBottom = useCallback(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+    }
+  }, [])
+
+  // Calculate and update total unread count - ONLY when conversations actually change
+  useEffect(() => {
+    const totalUnread = conversations.reduce((sum, conv) => sum + conv.unread_count, 0)
+    onNotificationUpdate(totalUnread)
+  }, [conversations, onNotificationUpdate])
+
+  // Load conversations function - memoized to prevent infinite loops
   const loadConversations = useCallback(async () => {
     if (!profile?.id) return
 
@@ -58,7 +99,77 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
     }
   }, [profile?.id])
 
-  // Load user's conversations on mount
+  // Handle new messages from real-time subscription - STABLE CALLBACK
+  const handleNewMessage = useCallback(
+    (newMessage: DMMessage) => {
+      if (!profile?.id) return
+
+      // Determine which conversation this message belongs to
+      const otherUserId = newMessage.sender_id === profile.id ? newMessage.recipient_id : newMessage.sender_id
+
+      // Add message to the appropriate conversation
+      setMessages((prev) => {
+        const existingMessages = prev[otherUserId] || []
+
+        // Check if message already exists to avoid duplicates
+        const messageExists = existingMessages.some((msg) => msg.id === newMessage.id)
+        if (messageExists) {
+          return prev
+        }
+
+        const updatedMessages = [...existingMessages, newMessage]
+
+        return {
+          ...prev,
+          [otherUserId]: updatedMessages,
+        }
+      })
+
+      // Update conversation list locally - NO SERVER CALLS
+      setConversations((prev) => {
+        const existingConvIndex = prev.findIndex((conv) => conv.other_user_id === otherUserId)
+
+        if (existingConvIndex >= 0) {
+          // Update existing conversation
+          const existingConv = prev[existingConvIndex]
+          const updatedConv = {
+            ...existingConv,
+            last_message: newMessage.content,
+            last_message_at: newMessage.created_at,
+            // Only increment unread count if message is not from current user and not in active conversation
+            unread_count:
+              newMessage.sender_id !== profile.id && otherUserId !== activeConversationRef.current
+                ? existingConv.unread_count + 1
+                : existingConv.unread_count,
+          }
+
+          // Move conversation to top and update it
+          const newConversations = [...prev]
+          newConversations.splice(existingConvIndex, 1)
+          return [updatedConv, ...newConversations]
+        }
+
+        // For completely new conversations, we'll handle them when they're created
+        return prev
+      })
+
+      // Auto-scroll to bottom if this conversation is active
+      if (otherUserId === activeConversationRef.current) {
+        setTimeout(() => {
+          scrollToBottom()
+        }, 10)
+      }
+    },
+    [profile?.id, scrollToBottom], // REMOVED activeConversation dependency
+  )
+
+  // Handle conversation updates from real-time - STABLE CALLBACK
+  const handleConversationUpdate = useCallback(() => {
+    // Don't reload conversations automatically - let local updates handle it
+    console.log("Conversation update received - handled locally")
+  }, [])
+
+  // Load user's conversations on mount and set up real-time - ONLY ONCE
   useEffect(() => {
     if (!profile?.id) return
 
@@ -70,44 +181,15 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
 
     initializeConversations()
 
-    // Subscribe to conversation updates
-    const conversationSub = dmService.subscribeToConversations(profile.id, () => {
-      loadConversations()
-    })
-
-    // Subscribe to new messages
-    const messagesSub = dmService.subscribeToUserMessages(profile.id, (newMessage) => {
-      console.log("📨 Received new message:", newMessage)
-
-      // Determine which conversation this message belongs to
-      const otherUserId = newMessage.sender_id === profile.id ? newMessage.recipient_id : newMessage.sender_id
-
-      // Add message to the appropriate conversation
-      setMessages((prev) => {
-        const existingMessages = prev[otherUserId] || []
-        // Check if message already exists to avoid duplicates
-        const messageExists = existingMessages.some((msg) => msg.id === newMessage.id)
-        if (messageExists) {
-          return prev
-        }
-
-        return {
-          ...prev,
-          [otherUserId]: [...existingMessages, newMessage],
-        }
-      })
-
-      // Refresh conversations to update last message and unread counts
-      loadConversations()
-    })
+    // Set up real-time subscriptions - STABLE DEPENDENCIES
+    dmService.subscribeToMessages(profile.id, handleNewMessage, handleConversationUpdate)
 
     return () => {
-      dmService.unsubscribe(`dm_conversations_${profile.id}`)
-      dmService.unsubscribe(`dm_messages_${profile.id}`)
+      dmService.cleanup()
     }
-  }, [profile?.id, loadConversations])
+  }, [profile?.id, handleNewMessage, handleConversationUpdate]) // These callbacks are now stable
 
-  // Load messages when active conversation changes
+  // Load messages when active conversation changes - ONLY load messages, NO conversation list updates
   useEffect(() => {
     if (!activeConversation || !profile?.id) return
 
@@ -115,32 +197,34 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
       setIsLoadingMessages(true)
       try {
         const msgs = await dmService.getConversationMessages(profile.id, activeConversation)
+
         setMessages((prev) => ({
           ...prev,
           [activeConversation]: msgs,
         }))
 
-        // Mark messages as read immediately when opening conversation
+        // Mark messages as read - let the real-time subscription handle updating unread counts
         await dmService.markMessagesAsRead(profile.id, activeConversation)
-
-        // Refresh conversations to update unread counts
-        await loadConversations()
       } catch (error) {
         console.error("Failed to load messages:", error)
       } finally {
         setIsLoadingMessages(false)
+        // Scroll to bottom after loading is complete
+        setTimeout(() => {
+          scrollToBottom()
+        }, 10)
       }
     }
 
     loadMessages()
-  }, [activeConversation, profile?.id, loadConversations])
+  }, [activeConversation, profile?.id, scrollToBottom])
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when messages change - but only for new messages in active conversation
   useEffect(() => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+    if (activeConversation && activeMessages.length > 0) {
+      scrollToBottom()
     }
-  }, [messages, activeConversation])
+  }, [activeMessages.length, activeConversation, scrollToBottom])
 
   // Search for users when typing in new conversation search
   useEffect(() => {
@@ -170,44 +254,13 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
     return () => clearTimeout(debounceTimer)
   }, [newConversationSearch, profile?.id])
 
-  const filteredConversations = conversations.filter(
-    (conv) =>
-      conv.other_user_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      conv.other_user_username.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
-
-  const activeConv = conversations.find((conv) => conv.other_user_id === activeConversation)
-  const activeMessages = activeConversation ? messages[activeConversation] || [] : []
-
   const handleSendMessage = async () => {
     if ((!message.trim() && attachedFiles.length === 0) || !activeConversation || !profile?.id || isSending) return
 
     setIsSending(true)
     const messageText = message.trim()
 
-    // Optimistically add message to UI
-    const optimisticMessage: DMMessage = {
-      id: `temp-${Date.now()}`,
-      conversation_id: "",
-      sender_id: profile.id,
-      recipient_id: activeConversation,
-      content: messageText,
-      created_at: new Date().toISOString(),
-      sender: {
-        id: profile.id,
-        name: profile.name || "You",
-        username: profile.username || "",
-        avatar: profile.pfp_url || "",
-      },
-    }
-
-    // Add optimistic message immediately
-    setMessages((prev) => ({
-      ...prev,
-      [activeConversation]: [...(prev[activeConversation] || []), optimisticMessage],
-    }))
-
-    // Clear input immediately
+    // Clear input immediately for better UX
     setMessage("")
     setAttachedFiles([])
 
@@ -218,33 +271,15 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
     try {
       const result = await dmService.sendMessage(profile.id, activeConversation, messageText)
 
-      if (result.success && result.message) {
-        // Replace optimistic message with real message
-        setMessages((prev) => ({
-          ...prev,
-          [activeConversation]: [
-            ...(prev[activeConversation] || []).filter((msg) => msg.id !== optimisticMessage.id),
-            result.message!,
-          ],
-        }))
-
-        // Refresh conversations to update last message
-        await loadConversations()
-      } else {
-        console.error("Failed to send message:", result.error)
-        // Remove optimistic message on failure
-        setMessages((prev) => ({
-          ...prev,
-          [activeConversation]: (prev[activeConversation] || []).filter((msg) => msg.id !== optimisticMessage.id),
-        }))
+      if (!result.success) {
+        console.error("Failed to send DM:", result.error)
+        // Restore message on failure
+        setMessage(messageText)
       }
     } catch (error) {
-      console.error("Error sending message:", error)
-      // Remove optimistic message on error
-      setMessages((prev) => ({
-        ...prev,
-        [activeConversation]: (prev[activeConversation] || []).filter((msg) => msg.id !== optimisticMessage.id),
-      }))
+      console.error("Error sending DM:", error)
+      // Restore message on error
+      setMessage(messageText)
     } finally {
       setIsSending(false)
     }
@@ -318,28 +353,26 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp)
     const now = new Date()
-    const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60)
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60))
+    const diffInHours = Math.floor(diffInMinutes / 60)
 
-    if (diffInHours < 1) {
+    if (diffInMinutes < 1) {
       return "now"
+    } else if (diffInMinutes < 60) {
+      return `${diffInMinutes}m ago`
     } else if (diffInHours < 24) {
-      return `${Math.floor(diffInHours)}h ago`
+      return `${diffInHours}h ago`
     } else {
       return date.toLocaleDateString()
     }
   }
 
-  // Handle conversation selection with immediate notification clearing
-  const handleConversationSelect = async (conversationId: string) => {
+  // Handle conversation selection - ABSOLUTELY NO STATE UPDATES TO CONVERSATIONS
+  const handleConversationSelect = useCallback((conversationId: string) => {
     setActiveConversation(conversationId)
-
-    // Mark messages as read immediately when selecting conversation
-    if (profile?.id) {
-      await dmService.markMessagesAsRead(profile.id, conversationId)
-      // Refresh conversations to update unread counts immediately
-      await loadConversations()
-    }
-  }
+    // That's it. Nothing else. The useEffect will handle loading messages and marking as read.
+    // The real-time subscription will handle updating unread counts when messages are marked as read.
+  }, [])
 
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -373,7 +406,7 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
 
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [showNewConversation, filteredConversations, activeConversation, onClose, profile?.id, loadConversations])
+  }, [showNewConversation, filteredConversations, activeConversation, onClose, handleConversationSelect])
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center">
@@ -448,7 +481,9 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-semibold truncate">{conv.other_user_name}</span>
-                        <span className="text-xs text-neutral-500">{formatTimestamp(conv.last_message_at)}</span>
+                        <span className="text-xs text-neutral-500">
+                          {conv.last_message_at ? formatTimestamp(conv.last_message_at) : ""}
+                        </span>
                       </div>
                       <p className="text-xs text-neutral-400 truncate">
                         {conv.last_message || "Start a conversation..."}
@@ -513,7 +548,10 @@ export function DirectMessages({ onClose }: DirectMessagesProps) {
               </div>
 
               {/* Messages */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <div
+                ref={messagesContainerRef}
+                className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-track-neutral-800 scrollbar-thumb-neutral-600 hover:scrollbar-thumb-neutral-500"
+              >
                 {isLoadingMessages ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="animate-spin w-6 h-6 border-2 border-neutral-600 border-t-neutral-300 rounded-full"></div>

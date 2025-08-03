@@ -1,17 +1,15 @@
 "use client"
 
-import type React from "react"
-import { createContext, useContext, useState, useEffect } from "react"
-import { getProfile, updateUserStatus } from "@/app/actions"
+import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { usePrivy } from "@privy-io/react-auth"
+import { createClient } from "@/lib/supabase/client"
 
 interface Profile {
   id: string
-  username: string
   name: string
-  pfp_url: string | null
-  bio: string | null
-  primary_wallet: string
-  connections: any
+  username: string
+  wallet: string
+  pfp_url?: string
   status: "online" | "dnd" | "offline"
   created_at: string
   updated_at: string
@@ -20,190 +18,180 @@ interface Profile {
 interface ProfileContextType {
   profile: Profile | null
   isLoading: boolean
-  error: string | null
-  refreshProfile: () => Promise<void>
-  updateProfileData: (newProfile: Profile) => void
-  updateStatus: (status: "online" | "dnd" | "offline") => Promise<void>
+  updateProfile: (updates: Partial<Profile>) => Promise<boolean>
+  updateStatus: (status: "online" | "dnd" | "offline") => Promise<boolean>
 }
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined)
 
-export function ProfileProvider({ children }: { children: React.ReactNode }) {
+export function ProfileProvider({ children }: { children: ReactNode }) {
+  const { user, authenticated } = usePrivy()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const supabase = createClient()
 
-  const refreshProfile = async () => {
-    try {
-      setIsLoading(true)
-      setError(null)
-      const profileData = await getProfile()
-      setProfile(profileData)
-    } catch (err) {
-      setError("Failed to load profile")
-      console.error("Error loading profile:", err)
-    } finally {
+  // Load profile when user is authenticated
+  useEffect(() => {
+    if (!authenticated || !user) {
+      setProfile(null)
       setIsLoading(false)
-    }
-  }
-
-  const updateProfileData = (newProfile: Profile) => {
-    setProfile(newProfile)
-  }
-
-  const updateStatus = async (status: "online" | "dnd" | "offline") => {
-    if (!profile) return
-
-    console.log(`🔄 Updating status from ${profile.status} to ${status}`)
-
-    // Optimistic update
-    const updatedProfile = { ...profile, status }
-    setProfile(updatedProfile)
-
-    try {
-      // Update in database
-      const result = await updateUserStatus(status)
-      if (result.error) {
-        console.error("❌ Failed to update status in database:", result.error)
-        // Revert optimistic update
-        setProfile(profile)
-        throw new Error(result.error)
-      }
-
-      console.log(`✅ Status updated successfully in database: ${status}`)
-
-      // The real-time subscription will handle updating the members list automatically
-      // No need to force refresh anymore since we have real-time updates
-
-      // Also refresh profile from database to ensure consistency
-      await refreshProfile()
-    } catch (error) {
-      console.error("❌ Status update failed:", error)
-      // Revert optimistic update
-      setProfile(profile)
-      throw error
-    }
-  }
-
-  // Set user offline when closing browser/tab
-  const setOfflineOnExit = () => {
-    if (profile && profile.status !== "offline") {
-      console.log("🚪 Browser/tab closing, setting status to offline")
-
-      // Use sendBeacon for reliable delivery during page unload
-      const formData = new FormData()
-      formData.append("status", "offline")
-
-      if (navigator.sendBeacon) {
-        const success = navigator.sendBeacon("/api/update-status", formData)
-        console.log(`📡 SendBeacon result: ${success}`)
-      } else {
-        // Fallback - make synchronous request (less reliable but better than nothing)
-        try {
-          const xhr = new XMLHttpRequest()
-          xhr.open("POST", "/api/update-status", false) // synchronous
-          xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded")
-          xhr.send("status=offline")
-          console.log("📡 Fallback XHR request sent")
-        } catch (error) {
-          console.error("Failed to send fallback request:", error)
-        }
-      }
-    }
-  }
-
-  // Handle app visibility changes and page unload
-  useEffect(() => {
-    if (!profile) return
-
-    const handleVisibilityChange = async () => {
-      console.log(`👁️ Visibility changed: ${document.visibilityState}`)
-
-      if (document.visibilityState === "visible") {
-        // Page became visible - set to online (unless user manually set to DND)
-        if (profile.status === "offline") {
-          try {
-            console.log("📱 Page became visible, setting status to online")
-            await updateStatus("online")
-          } catch (error) {
-            console.error("Failed to set online status on visibility change:", error)
-          }
-        }
-      }
-      // Don't set offline on visibility hidden - could be file dialogs, other windows, etc.
+      return
     }
 
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      console.log("🚨 beforeunload event triggered - tab/browser closing")
-      setOfflineOnExit()
-      // Don't prevent the unload, just set status
-    }
-
-    const handleUnload = () => {
-      console.log("🚨 unload event triggered - tab/browser closing")
-      setOfflineOnExit()
-    }
-
-    const handlePageHide = () => {
-      console.log("🚨 pagehide event triggered - tab/browser closing")
-      setOfflineOnExit()
-    }
-
-    // Only add the events that actually indicate tab/browser closing
-    document.addEventListener("visibilitychange", handleVisibilityChange)
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    window.addEventListener("unload", handleUnload)
-    window.addEventListener("pagehide", handlePageHide)
-
-    // Cleanup event listeners
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange)
-      window.removeEventListener("beforeunload", handleBeforeUnload)
-      window.removeEventListener("unload", handleUnload)
-      window.removeEventListener("pagehide", handlePageHide)
-    }
-  }, [profile])
-
-  useEffect(() => {
-    const loadProfileAndSetOnline = async () => {
+    const loadProfile = async () => {
       try {
-        setIsLoading(true)
-        setError(null)
+        const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single()
 
-        // Load profile first
-        const profileData = await getProfile()
-        setProfile(profileData)
-
-        // Set user to online when they open the app
-        if (profileData) {
-          try {
-            console.log("🚀 App loaded, setting initial status to online")
-            await updateUserStatus("online")
-            // Update local profile status immediately
-            setProfile({ ...profileData, status: "online" })
-          } catch (error) {
-            console.error("Failed to set initial online status:", error)
-          }
+        if (error) {
+          console.error("Error loading profile:", error)
+          setProfile(null)
+        } else {
+          setProfile(data)
+          console.log("👤 Profile loaded:", data.name)
         }
-      } catch (err) {
-        setError("Failed to load profile")
-        console.error("Error loading profile:", err)
+      } catch (error) {
+        console.error("Error in loadProfile:", error)
+        setProfile(null)
       } finally {
         setIsLoading(false)
       }
     }
 
-    loadProfileAndSetOnline()
-  }, [])
+    loadProfile()
+  }, [authenticated, user, supabase])
+
+  // Set user online when they load the app
+  useEffect(() => {
+    if (!profile?.id) return
+
+    const setOnline = async () => {
+      try {
+        console.log("🟢 Setting user online:", profile.name)
+        await updateStatus("online")
+      } catch (error) {
+        console.error("Error setting user online:", error)
+      }
+    }
+
+    setOnline()
+  }, [profile?.id])
+
+  // Handle browser/tab closing to set user offline
+  useEffect(() => {
+    if (!profile?.id) return
+
+    const setOfflineOnExit = () => {
+      console.log("🔴 Setting user offline on exit")
+
+      // Use sendBeacon for reliable offline status on page unload
+      const data = new FormData()
+      data.append("status", "offline")
+
+      try {
+        // Try sendBeacon first (most reliable for page unload)
+        if (navigator.sendBeacon) {
+          const success = navigator.sendBeacon("/api/update-status", data)
+          console.log("📡 sendBeacon result:", success)
+        } else {
+          // Fallback to synchronous XHR
+          const xhr = new XMLHttpRequest()
+          xhr.open("POST", "/api/update-status", false) // synchronous
+          xhr.send(data)
+          console.log("📡 XHR fallback completed")
+        }
+      } catch (error) {
+        console.error("Error setting offline status:", error)
+      }
+    }
+
+    // Handle page visibility changes
+    const handleVisibilityChange = () => {
+      console.log("👁️ Visibility changed:", document.visibilityState)
+
+      if (document.visibilityState === "visible") {
+        // User came back to the tab - set them online
+        console.log("🟢 Tab visible - setting online")
+        updateStatus("online")
+      }
+      // Don't set offline on hidden - only on actual tab closing
+    }
+
+    // Add event listeners for browser/tab closing
+    window.addEventListener("beforeunload", setOfflineOnExit)
+    window.addEventListener("unload", setOfflineOnExit)
+    window.addEventListener("pagehide", setOfflineOnExit)
+
+    // Add visibility change listener
+    document.addEventListener("visibilitychange", handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener("beforeunload", setOfflineOnExit)
+      window.removeEventListener("unload", setOfflineOnExit)
+      window.removeEventListener("pagehide", setOfflineOnExit)
+      document.removeEventListener("visibilitychange", handleVisibilityChange)
+    }
+  }, [profile?.id])
+
+  const updateProfile = async (updates: Partial<Profile>): Promise<boolean> => {
+    if (!profile?.id) return false
+
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", profile.id)
+        .select()
+        .single()
+
+      if (error) {
+        console.error("Error updating profile:", error)
+        return false
+      }
+
+      setProfile(data)
+      console.log("✅ Profile updated:", updates)
+      return true
+    } catch (error) {
+      console.error("Error in updateProfile:", error)
+      return false
+    }
+  }
+
+  const updateStatus = async (status: "online" | "dnd" | "offline"): Promise<boolean> => {
+    if (!profile?.id) return false
+
+    try {
+      const { error } = await supabase
+        .from("profiles")
+        .update({
+          status,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", profile.id)
+
+      if (error) {
+        console.error("Error updating status:", error)
+        return false
+      }
+
+      setProfile((prev) => (prev ? { ...prev, status } : null))
+      console.log(`📊 Status updated to: ${status}`)
+      return true
+    } catch (error) {
+      console.error("Error in updateStatus:", error)
+      return false
+    }
+  }
 
   return (
     <ProfileContext.Provider
       value={{
         profile,
         isLoading,
-        error,
-        refreshProfile,
-        updateProfileData,
+        updateProfile,
         updateStatus,
       }}
     >
