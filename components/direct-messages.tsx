@@ -93,6 +93,7 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
 
     try {
       const convs = await dmService.getUserConversations(profile.id)
+      console.log("Loaded conversations:", convs)
       setConversations(convs)
     } catch (error) {
       console.error("Failed to load conversations:", error)
@@ -103,6 +104,8 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
   const handleNewMessage = useCallback(
     (newMessage: DMMessage) => {
       if (!profile?.id) return
+
+      console.log("New message received:", newMessage)
 
       // Determine which conversation this message belongs to
       const otherUserId = newMessage.sender_id === profile.id ? newMessage.recipient_id : newMessage.sender_id
@@ -125,7 +128,7 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
         }
       })
 
-      // Update conversation list locally - NO SERVER CALLS
+      // Update conversation list with the new message
       setConversations((prev) => {
         const existingConvIndex = prev.findIndex((conv) => conv.other_user_id === otherUserId)
 
@@ -136,7 +139,6 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
             ...existingConv,
             last_message: newMessage.content,
             last_message_at: newMessage.created_at,
-            // Only increment unread count if message is not from current user and not in active conversation
             unread_count:
               newMessage.sender_id !== profile.id && otherUserId !== activeConversationRef.current
                 ? existingConv.unread_count + 1
@@ -149,7 +151,6 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
           return [updatedConv, ...newConversations]
         }
 
-        // For completely new conversations, we'll handle them when they're created
         return prev
       })
 
@@ -160,14 +161,16 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
         }, 10)
       }
     },
-    [profile?.id, scrollToBottom], // REMOVED activeConversation dependency
+    [profile?.id, scrollToBottom],
   )
 
   // Handle conversation updates from real-time - STABLE CALLBACK
   const handleConversationUpdate = useCallback(() => {
-    // Don't reload conversations automatically - let local updates handle it
-    console.log("Conversation update received - handled locally")
-  }, [])
+    console.log("Conversation update received - reloading conversations")
+    if (profile?.id) {
+      loadConversations()
+    }
+  }, [profile?.id, loadConversations])
 
   // Load user's conversations on mount and set up real-time - ONLY ONCE
   useEffect(() => {
@@ -187,7 +190,7 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
     return () => {
       dmService.cleanup()
     }
-  }, [profile?.id, handleNewMessage, handleConversationUpdate]) // These callbacks are now stable
+  }, [profile?.id, handleNewMessage, handleConversationUpdate])
 
   // Load messages when active conversation changes - ONLY load messages, NO conversation list updates
   useEffect(() => {
@@ -203,8 +206,13 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
           [activeConversation]: msgs,
         }))
 
-        // Mark messages as read - let the real-time subscription handle updating unread counts
+        // Mark messages as read
         await dmService.markMessagesAsRead(profile.id, activeConversation)
+
+        // Update the conversation's unread count locally
+        setConversations((prev) =>
+          prev.map((conv) => (conv.other_user_id === activeConversation ? { ...conv, unread_count: 0 } : conv)),
+        )
       } catch (error) {
         console.error("Failed to load messages:", error)
       } finally {
@@ -367,12 +375,15 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
     }
   }
 
-  // Handle conversation selection - ABSOLUTELY NO STATE UPDATES TO CONVERSATIONS
+  // Handle conversation selection
   const handleConversationSelect = useCallback((conversationId: string) => {
     setActiveConversation(conversationId)
-    // That's it. Nothing else. The useEffect will handle loading messages and marking as read.
-    // The real-time subscription will handle updating unread counts when messages are marked as read.
   }, [])
+
+  // Helper function to check if image URL is valid
+  const hasValidImageUrl = (url?: string) => {
+    return url && url.trim() !== "" && url !== "null" && url !== "undefined"
+  }
 
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -460,11 +471,15 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
                   >
                     <div className="relative mr-3">
                       <div className="w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
-                        {conv.other_user_pfp_url ? (
+                        {hasValidImageUrl(conv.other_user_pfp_url) ? (
                           <img
                             src={conv.other_user_pfp_url || "/placeholder.svg"}
                             alt={conv.other_user_name}
                             className="w-full h-full object-cover"
+                            onError={(e) => {
+                              console.log("Image failed to load:", conv.other_user_pfp_url)
+                              e.currentTarget.style.display = "none"
+                            }}
                           />
                         ) : (
                           <span className="text-sm font-bold text-neutral-300">
@@ -520,11 +535,15 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
                 <div className="flex items-center">
                   <div className="relative mr-3">
                     <div className="w-8 h-8 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
-                      {activeConv?.other_user_pfp_url ? (
+                      {hasValidImageUrl(activeConv?.other_user_pfp_url) ? (
                         <img
-                          src={activeConv.other_user_pfp_url || "/placeholder.svg"}
-                          alt={activeConv.other_user_name}
+                          src={activeConv?.other_user_pfp_url || "/placeholder.svg"}
+                          alt={activeConv?.other_user_name}
                           className="w-full h-full object-cover"
+                          onError={(e) => {
+                            console.log("Header image failed to load:", activeConv?.other_user_pfp_url)
+                            e.currentTarget.style.display = "none"
+                          }}
                         />
                       ) : (
                         <span className="text-sm font-bold text-neutral-300">
@@ -720,11 +739,15 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
                       >
                         <div className="relative mr-3">
                           <div className="w-10 h-10 bg-neutral-700 rounded-none flex items-center justify-center overflow-hidden">
-                            {user.pfp_url ? (
+                            {hasValidImageUrl(user.pfp_url) ? (
                               <img
                                 src={user.pfp_url || "/placeholder.svg"}
                                 alt={user.name}
                                 className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  console.log("Search image failed to load:", user.pfp_url)
+                                  e.currentTarget.style.display = "none"
+                                }}
                               />
                             ) : (
                               <span className="text-sm font-bold text-neutral-300">

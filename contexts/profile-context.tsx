@@ -8,8 +8,10 @@ interface Profile {
   id: string
   name: string
   username: string
-  wallet: string
+  primary_wallet: string
   pfp_url?: string
+  bio?: string
+  connections?: Record<string, string>
   status: "online" | "dnd" | "offline"
   created_at: string
   updated_at: string
@@ -18,6 +20,7 @@ interface Profile {
 interface ProfileContextType {
   profile: Profile | null
   isLoading: boolean
+  refreshProfile: () => Promise<void>
   updateProfile: (updates: Partial<Profile>) => Promise<boolean>
   updateStatus: (status: "online" | "dnd" | "offline") => Promise<boolean>
 }
@@ -30,33 +33,42 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
   const supabase = createClient()
 
-  // Load profile when user is authenticated
-  useEffect(() => {
+  // Load profile function
+  const loadProfile = async () => {
     if (!authenticated || !user) {
       setProfile(null)
       setIsLoading(false)
       return
     }
 
-    const loadProfile = async () => {
-      try {
-        const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single()
+    try {
+      const { data, error } = await supabase.from("profiles").select("*").eq("id", user.id).single()
 
-        if (error) {
-          console.error("Error loading profile:", error)
-          setProfile(null)
-        } else {
-          setProfile(data)
-          console.log("👤 Profile loaded:", data.name)
-        }
-      } catch (error) {
-        console.error("Error in loadProfile:", error)
+      if (error) {
+        console.error("Error loading profile:", error)
         setProfile(null)
-      } finally {
-        setIsLoading(false)
+      } else {
+        setProfile(data)
+        console.log("👤 Profile loaded:", data.name)
       }
+    } catch (error) {
+      console.error("Error in loadProfile:", error)
+      setProfile(null)
+    } finally {
+      setIsLoading(false)
     }
+  }
 
+  // Refresh profile function (exposed to components)
+  const refreshProfile = async () => {
+    if (!authenticated || !user) return
+
+    setIsLoading(true)
+    await loadProfile()
+  }
+
+  // Load profile when user is authenticated
+  useEffect(() => {
     loadProfile()
   }, [authenticated, user, supabase])
 
@@ -191,6 +203,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       value={{
         profile,
         isLoading,
+        refreshProfile,
         updateProfile,
         updateStatus,
       }}

@@ -37,6 +37,8 @@ export class DirectMessagesService {
   // Get user's conversations
   async getUserConversations(userId: string): Promise<DMConversation[]> {
     try {
+      console.log("🔍 Fetching conversations for user:", userId)
+
       const { data, error } = await this.supabase.rpc("get_user_conversations", {
         input_user_id: userId,
       })
@@ -45,6 +47,8 @@ export class DirectMessagesService {
         console.error("Error fetching conversations:", error)
         return []
       }
+
+      console.log("📋 Raw conversation data:", data)
 
       return (data || []).map((conv: any) => ({
         id: conv.id,
@@ -71,8 +75,8 @@ export class DirectMessagesService {
 
       // First, get or create the conversation to get the conversation_id
       const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
-        input_user1_id: userId,
-        input_user2_id: otherUserId,
+        user1: userId,
+        user2: otherUserId,
       })
 
       if (convError) {
@@ -164,8 +168,8 @@ export class DirectMessagesService {
 
       // Get or create conversation
       const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
-        input_user1_id: senderId,
-        input_user2_id: recipientId,
+        user1: senderId,
+        user2: recipientId,
       })
 
       if (convError) {
@@ -193,6 +197,20 @@ export class DirectMessagesService {
       }
 
       console.log("✅ DM successfully inserted:", message.id)
+
+      // Update the conversation's last_message_id and last_message_at
+      const { error: updateError } = await this.supabase
+        .from("dm_conversations")
+        .update({
+          last_message_id: message.id,
+          last_message_at: new Date().toISOString(),
+        })
+        .eq("id", conversationId)
+
+      if (updateError) {
+        console.error("Error updating conversation:", updateError)
+        // Continue anyway since the message was sent
+      }
 
       // Get sender profile
       const { data: senderProfile } = await this.supabase
@@ -231,8 +249,8 @@ export class DirectMessagesService {
     try {
       // Get the conversation ID first
       const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
-        input_user1_id: userId,
-        input_user2_id: otherUserId,
+        user1: userId,
+        user2: otherUserId,
       })
 
       if (convError) {
@@ -319,7 +337,25 @@ export class DirectMessagesService {
 
               console.log("📨 Formatted message:", formattedMessage)
               onMessage(formattedMessage)
-              onConversationUpdate() // Update conversation list
+
+              // Update the conversation's last_message_id and last_message_at
+              const { error: updateError } = await this.supabase
+                .from("dm_conversations")
+                .update({
+                  last_message_id: message.id,
+                  last_message_at: new Date().toISOString(),
+                })
+                .eq("id", message.conversation_id)
+
+              if (updateError) {
+                console.error("Error updating conversation:", updateError)
+              }
+
+              // Trigger conversation list update after a short delay to ensure DB is updated
+              setTimeout(() => {
+                console.log("🔄 Triggering conversation update after new message")
+                onConversationUpdate()
+              }, 100)
             } else {
               console.log("📨 Message not for current user, ignoring")
             }
