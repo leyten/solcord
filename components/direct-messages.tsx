@@ -1,9 +1,10 @@
 "use client"
 
 import type React from "react"
-
+import { DMMessageAttachments } from "@/components/dm-message-attachments"
+import type { MessageAttachment, UserSearchResult } from "@/lib/types/messages"
 import { useState, useRef, type KeyboardEvent, useEffect, useCallback, useMemo } from "react"
-import { X, Search, MessageCircle, User, Plus, Send, Paperclip } from "lucide-react"
+import { X, Search, MessageCircle, User, Plus, Send, Paperclip, AlertCircle } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -14,19 +15,10 @@ import { dmService, type DMMessage, type DMConversation } from "@/lib/services/d
 interface DirectMessagesProps {
   onClose: () => void
   onNotificationUpdate: (count: number) => void
+  initialConversationUserId?: string
 }
 
-interface UserSearchResult {
-  id: string
-  name: string
-  username: string
-  wallet: string
-  online: boolean
-  pfp_url?: string
-  status?: "online" | "dnd" | "offline"
-}
-
-export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessagesProps) {
+export function DirectMessages({ onClose, onNotificationUpdate, initialConversationUserId }: DirectMessagesProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [activeConversation, setActiveConversation] = useState<string | null>(null)
   const [showNewConversation, setShowNewConversation] = useState(false)
@@ -120,11 +112,21 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
           return prev
         }
 
-        const updatedMessages = [...existingMessages, newMessage]
+        // If this is a real message (not optimistic), replace any optimistic message
+        let updatedMessages = existingMessages
+        if (!newMessage.isOptimistic) {
+          // Remove any optimistic messages with the same content and sender
+          updatedMessages = existingMessages.filter(
+            (msg) =>
+              !(msg.isOptimistic && msg.content === newMessage.content && msg.sender_id === newMessage.sender_id),
+          )
+        }
+
+        const finalMessages = [...updatedMessages, newMessage]
 
         return {
           ...prev,
-          [otherUserId]: updatedMessages,
+          [otherUserId]: finalMessages,
         }
       })
 
@@ -191,6 +193,20 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
       dmService.cleanup()
     }
   }, [profile?.id, handleNewMessage, handleConversationUpdate])
+
+  // Handle initial conversation user ID
+  useEffect(() => {
+    if (initialConversationUserId && conversations.length > 0) {
+      // Check if conversation already exists
+      const existingConv = conversations.find((conv) => conv.other_user_id === initialConversationUserId)
+      if (existingConv) {
+        setActiveConversation(initialConversationUserId)
+      } else {
+        // Start new conversation
+        setActiveConversation(initialConversationUserId)
+      }
+    }
+  }, [initialConversationUserId, conversations])
 
   // Load messages when active conversation changes - ONLY load messages, NO conversation list updates
   useEffect(() => {
@@ -268,26 +284,124 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
     setIsSending(true)
     const messageText = message.trim()
 
-    // Clear input immediately for better UX
-    setMessage("")
-    setAttachedFiles([])
-
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto"
-    }
+    // Generate optimistic message ID
+    const optimisticId = `optimistic_${Date.now()}_${Math.random()}`
 
     try {
-      const result = await dmService.sendMessage(profile.id, activeConversation, messageText)
+      // Upload attachments first if any
+      const uploadedAttachments: MessageAttachment[] = []
+      if (attachedFiles.length > 0) {
+        console.log("📎 Uploading attachments...")
+        for (const file of attachedFiles) {
+          const attachment = await dmService.uploadAttachment(file, profile.id)
+          if (attachment) {
+            uploadedAttachments.push(attachment)
+          } else {
+            console.error("Failed to upload attachment:", file.name)
+          }
+        }
+        console.log("📎 Uploaded attachments:", uploadedAttachments)
+      }
+
+      // Create optimistic message
+      const optimisticMessage: DMMessage = {
+        id: optimisticId,
+        conversation_id: "temp",
+        sender_id: profile.id,
+        recipient_id: activeConversation,
+        content: messageText,
+        created_at: new Date().toISOString(),
+        attachments: uploadedAttachments,
+        isOptimistic: true,
+        sender: {
+          id: profile.id,
+          name: profile.name,
+          username: profile.username,
+          avatar: profile.pfp_url || "",
+        },
+      }
+
+      // Add optimistic message immediately
+      setMessages((prev) => ({
+        ...prev,
+        [activeConversation]: [...(prev[activeConversation] || []), optimisticMessage],
+      }))
+
+      // Update conversation list optimistically
+      setConversations((prev) => {
+        const existingConvIndex = prev.findIndex((conv) => conv.other_user_id === activeConversation)
+        if (existingConvIndex >= 0) {
+          const existingConv = prev[existingConvIndex]
+          const updatedConv = {
+            ...existingConv,
+            last_message: messageText || (uploadedAttachments.length > 0 ? "📎 Attachment" : ""),
+            last_message_at: new Date().toISOString(),
+          }
+
+          // Move conversation to top
+          const newConversations = [...prev]
+          newConversations.splice(existingConvIndex, 1)
+          return [updatedConv, ...newConversations]
+        }
+        return prev
+      })
+
+      // Clear input immediately for better UX
+      setMessage("")
+      setAttachedFiles([])
+
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto"
+      }
+
+      // Scroll to bottom to show the optimistic message
+      setTimeout(() => {
+        scrollToBottom()
+      }, 10)
+
+      const result = await dmService.sendMessage(
+        profile.id,
+        activeConversation,
+        messageText,
+        uploadedAttachments,
+        optimisticId,
+      )
 
       if (!result.success) {
         console.error("Failed to send DM:", result.error)
+
+        // Mark optimistic message as failed
+        setMessages((prev) => ({
+          ...prev,
+          [activeConversation]: (prev[activeConversation] || []).map((msg) =>
+            msg.id === optimisticId ? { ...msg, isFailed: true } : msg,
+          ),
+        }))
+
         // Restore message on failure
         setMessage(messageText)
+        setAttachedFiles(attachedFiles)
+      } else {
+        // Remove optimistic message since real one will come via real-time
+        setMessages((prev) => ({
+          ...prev,
+          [activeConversation]: (prev[activeConversation] || []).filter((msg) => msg.id !== optimisticId),
+        }))
       }
     } catch (error) {
       console.error("Error sending DM:", error)
+
+      // Mark optimistic message as failed
+      setMessages((prev) => ({
+        ...prev,
+        [activeConversation]: (prev[activeConversation] || []).map((msg) =>
+          msg.id === optimisticId ? { ...msg, isFailed: true } : msg,
+        ),
+      }))
+
       // Restore message on error
       setMessage(messageText)
+      setAttachedFiles(attachedFiles)
     } finally {
       setIsSending(false)
     }
@@ -385,6 +499,25 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
     return url && url.trim() !== "" && url !== "null" && url !== "undefined"
   }
 
+  // Retry failed message
+  const retryMessage = async (failedMessage: DMMessage) => {
+    if (!activeConversation || !profile?.id) return
+
+    // Remove failed message
+    setMessages((prev) => ({
+      ...prev,
+      [activeConversation]: (prev[activeConversation] || []).filter((msg) => msg.id !== failedMessage.id),
+    }))
+
+    // Restore message to input
+    setMessage(failedMessage.content)
+
+    // If there were attachments, we can't easily restore them, so just show a message
+    if (failedMessage.attachments && failedMessage.attachments.length > 0) {
+      console.log("Note: Attachments from failed message cannot be restored. Please re-attach files.")
+    }
+  }
+
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -417,6 +550,77 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
 
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
+  }, [showNewConversation, filteredConversations, activeConversation, onClose, handleConversationSelect])
+
+  // Add a useEffect hook to focus the textarea when a conversation is selected or when the component mounts with an active conversation
+  useEffect(() => {
+    // Auto-focus the textarea when conversation is selected or component mounts
+    if (activeConversation && textareaRef.current && !isLoadingMessages) {
+      const focusTextarea = () => {
+        textareaRef.current?.focus()
+      }
+
+      // Small delay to ensure the textarea is rendered
+      const timeoutId = setTimeout(focusTextarea, 100)
+      return () => clearTimeout(timeoutId)
+    }
+  }, [activeConversation, isLoadingMessages])
+
+  // Add keyboard event listener for global typing
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
+      // Don't interfere with existing keyboard shortcuts
+      if (e.key === "Escape") {
+        if (showNewConversation) {
+          setShowNewConversation(false)
+          setNewConversationSearch("")
+          setSearchResults([])
+          return
+        }
+        onClose()
+        return
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key === "n") {
+        e.preventDefault()
+        setShowNewConversation(true)
+        return
+      }
+
+      if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        e.preventDefault()
+        const currentIndex = filteredConversations.findIndex((conv) => conv.other_user_id === activeConversation)
+
+        if (e.key === "ArrowUp" && currentIndex > 0) {
+          handleConversationSelect(filteredConversations[currentIndex - 1].other_user_id)
+        } else if (e.key === "ArrowDown" && currentIndex < filteredConversations.length - 1) {
+          handleConversationSelect(filteredConversations[currentIndex + 1].other_user_id)
+        }
+        return
+      }
+
+      // Auto-focus textarea when typing (if not in a modal and conversation is active)
+      if (
+        activeConversation &&
+        !showNewConversation &&
+        textareaRef.current &&
+        document.activeElement !== textareaRef.current &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey &&
+        e.key.length === 1 && // Only single characters
+        e.target && // Ensure target exists
+        !(e.target as Element).closest("input") && // Not typing in an input
+        !(e.target as Element).closest("textarea") && // Not typing in a textarea
+        !(e.target as Element).closest("[contenteditable]") // Not typing in contenteditable
+      ) {
+        textareaRef.current.focus()
+        // Don't prevent default here - let the character be typed
+      }
+    }
+
+    document.addEventListener("keydown", handleGlobalKeyDown)
+    return () => document.removeEventListener("keydown", handleGlobalKeyDown)
   }, [showNewConversation, filteredConversations, activeConversation, onClose, handleConversationSelect])
 
   return (
@@ -587,17 +791,51 @@ export function DirectMessages({ onClose, onNotificationUpdate }: DirectMessages
                   <>
                     {activeMessages.map((msg) => {
                       const isOwn = msg.sender_id === profile?.id
+                      const hasText = msg.content && msg.content.trim()
+                      const hasAttachments = msg.attachments && msg.attachments.length > 0
+
                       return (
                         <div key={msg.id} className={`flex ${isOwn ? "justify-end" : "justify-start"}`}>
-                          <div
-                            className={`max-w-xs lg:max-w-md px-4 py-2 rounded-none ${
-                              isOwn ? "bg-blue-600 text-white" : "bg-neutral-800 text-neutral-100"
-                            }`}
-                          >
-                            <p className="text-sm">{msg.content}</p>
-                            <p className={`text-xs mt-1 ${isOwn ? "text-blue-200" : "text-neutral-500"}`}>
-                              {formatTimestamp(msg.created_at)}
-                            </p>
+                          <div className="max-w-xs lg:max-w-md space-y-1">
+                            {/* Text message */}
+                            {hasText && (
+                              <div
+                                className={`px-4 py-2 rounded-none relative ${
+                                  isOwn ? "bg-blue-600 text-white" : "bg-neutral-800 text-neutral-100"
+                                } ${msg.isOptimistic ? "opacity-70" : ""} ${msg.isFailed ? "bg-red-600" : ""}`}
+                              >
+                                <div className="flex items-center gap-2">
+                                  <p className="text-sm flex-1">{msg.content}</p>
+                                  {msg.isFailed && (
+                                    <button
+                                      onClick={() => retryMessage(msg)}
+                                      className="text-white hover:text-red-200 transition-colors"
+                                      title="Retry message"
+                                    >
+                                      <AlertCircle className="w-4 h-4" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Attachments */}
+                            {hasAttachments && (
+                              <div className={`${isOwn ? "flex justify-end" : "flex justify-start"}`}>
+                                <DMMessageAttachments attachments={msg.attachments || []} isOwn={isOwn} />
+                              </div>
+                            )}
+
+                            {/* Timestamp */}
+                            <div className={`${isOwn ? "text-right" : "text-left"}`}>
+                              <p className="text-xs text-neutral-500">
+                                {msg.isOptimistic
+                                  ? "Sending..."
+                                  : msg.isFailed
+                                    ? "Failed to send"
+                                    : formatTimestamp(msg.created_at)}
+                              </p>
+                            </div>
                           </div>
                         </div>
                       )

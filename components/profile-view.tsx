@@ -6,6 +6,7 @@ import { useProfile } from "@/contexts/profile-context"
 import { getUserProfile } from "@/app/actions"
 import { useState, useEffect } from "react"
 import type { ChannelUser } from "@/lib/types"
+import { DirectMessages } from "@/components/direct-messages"
 
 interface ProfileViewProps {
   user: ChannelUser | null
@@ -43,6 +44,8 @@ export function ProfileView({ user, onClose, onOpenSettings }: ProfileViewProps)
   const [fullProfile, setFullProfile] = useState<FullProfile | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [copiedWallet, setCopiedWallet] = useState(false)
+  const [showDirectMessages, setShowDirectMessages] = useState(false)
+  const [dmNotificationCount, setDmNotificationCount] = useState(0)
 
   useEffect(() => {
     if (!user) return
@@ -263,13 +266,26 @@ export function ProfileView({ user, onClose, onOpenSettings }: ProfileViewProps)
 
               {/* Action buttons */}
               {!isOwnProfile && (
-                <Button className="w-full bg-white hover:bg-neutral-200 text-black rounded-none font-medium" size="sm">
+                <Button
+                  onClick={() => setShowDirectMessages(true)}
+                  className="w-full bg-white hover:bg-neutral-200 text-black rounded-none font-medium"
+                  size="sm"
+                >
                   Send Message
                 </Button>
               )}
             </>
           )}
         </div>
+
+        {/* Direct Messages Modal */}
+        {showDirectMessages && (
+          <DirectMessages
+            onClose={() => setShowDirectMessages(false)}
+            onNotificationUpdate={setDmNotificationCount}
+            initialConversationUserId={user.id}
+          />
+        )}
       </div>
     </div>
   )

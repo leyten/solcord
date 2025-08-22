@@ -57,3 +57,13 @@ export interface SendMessageData {
   embeds?: MessageEmbed[]
   reply_to?: string
 }
+
+export interface UserSearchResult {
+  id: string
+  name: string
+  username: string
+  wallet: string
+  online: boolean
+  pfp_url?: string
+  status?: "online" | "dnd" | "offline"
+}

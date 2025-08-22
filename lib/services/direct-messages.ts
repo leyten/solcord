@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client"
+import type { MessageAttachment } from "@/lib/types/messages"
 
 export interface DMMessage {
   id: string
@@ -8,12 +9,16 @@ export interface DMMessage {
   content: string
   created_at: string
   read_at?: string
+  attachments?: MessageAttachment[]
   sender?: {
     id: string
     name: string
     username: string
     avatar: string
   }
+  // Add optimistic update fields
+  isOptimistic?: boolean
+  isFailed?: boolean
 }
 
 export interface DMConversation {
@@ -125,6 +130,7 @@ export class DirectMessagesService {
           content: msg.content,
           created_at: msg.created_at,
           read_at: msg.read_at,
+          attachments: msg.attachments || [],
         }))
       }
 
@@ -141,6 +147,7 @@ export class DirectMessagesService {
           content: msg.content,
           created_at: msg.created_at,
           read_at: msg.read_at,
+          attachments: msg.attachments || [],
           sender: senderProfile
             ? {
                 id: senderProfile.id,
@@ -157,14 +164,16 @@ export class DirectMessagesService {
     }
   }
 
-  // Send a message
+  // Send a message with optimistic update support
   async sendMessage(
     senderId: string,
     recipientId: string,
     content: string,
-  ): Promise<{ success: boolean; message?: DMMessage; error?: string }> {
+    attachments?: MessageAttachment[],
+    optimisticId?: string,
+  ): Promise<{ success: boolean; message?: DMMessage; error?: string; optimisticId?: string }> {
     try {
-      console.log("📤 Attempting to send DM:", { senderId, recipientId, content })
+      console.log("📤 Attempting to send DM:", { senderId, recipientId, content, attachments, optimisticId })
 
       // Get or create conversation
       const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
@@ -174,7 +183,7 @@ export class DirectMessagesService {
 
       if (convError) {
         console.error("Error getting/creating conversation:", convError)
-        return { success: false, error: "Failed to create conversation" }
+        return { success: false, error: "Failed to create conversation", optimisticId }
       }
 
       console.log(`📤 Using conversation ID: ${conversationId}`)
@@ -186,14 +195,15 @@ export class DirectMessagesService {
           conversation_id: conversationId,
           sender_id: senderId,
           recipient_id: recipientId,
-          content,
+          content: content || null,
+          attachments: attachments || null,
         })
         .select("*")
         .single()
 
       if (msgError) {
         console.error("Error sending message:", msgError)
-        return { success: false, error: "Failed to send message" }
+        return { success: false, error: "Failed to send message", optimisticId }
       }
 
       console.log("✅ DM successfully inserted:", message.id)
@@ -227,6 +237,7 @@ export class DirectMessagesService {
         content: message.content,
         created_at: message.created_at,
         read_at: message.read_at,
+        attachments: message.attachments || [],
         sender: senderProfile
           ? {
               id: senderProfile.id,
@@ -237,10 +248,10 @@ export class DirectMessagesService {
           : undefined,
       }
 
-      return { success: true, message: formattedMessage }
+      return { success: true, message: formattedMessage, optimisticId }
     } catch (error) {
       console.error("Error in sendMessage:", error)
-      return { success: false, error: "Failed to send message" }
+      return { success: false, error: "Failed to send message", optimisticId }
     }
   }
 
@@ -275,6 +286,40 @@ export class DirectMessagesService {
     } catch (error) {
       console.error("Error in markMessagesAsRead:", error)
       return false
+    }
+  }
+
+  // Upload attachment for DM
+  async uploadAttachment(file: File, authorId: string): Promise<MessageAttachment | null> {
+    try {
+      const fileExt = file.name.split(".").pop()
+      const timestamp = Date.now()
+      const fileName = `dm/${authorId}/${timestamp}.${fileExt}`
+
+      const { data, error } = await this.supabase.storage.from("message-attachments").upload(fileName, file, {
+        contentType: file.type,
+        cacheControl: "3600",
+      })
+
+      if (error) {
+        console.error("Error uploading DM attachment:", error)
+        return null
+      }
+
+      const { data: urlData } = this.supabase.storage.from("message-attachments").getPublicUrl(fileName)
+
+      return {
+        id: timestamp.toString(),
+        filename: file.name,
+        size: file.size,
+        content_type: file.type,
+        url: urlData.publicUrl,
+        width: undefined,
+        height: undefined,
+      }
+    } catch (error) {
+      console.error("Error in uploadAttachment:", error)
+      return null
     }
   }
 
@@ -325,6 +370,7 @@ export class DirectMessagesService {
                 content: message.content,
                 created_at: message.created_at,
                 read_at: message.read_at,
+                attachments: message.attachments || [],
                 sender: sender
                   ? {
                       id: sender.id,
