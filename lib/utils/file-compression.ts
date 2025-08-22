@@ -1,6 +1,6 @@
 import imageCompression from "browser-image-compression"
 
-export async function compressImage(file: File): Promise<File> {
+export async function compressImage(file: File, p0: { maxWidth: number; maxHeight: number; quality: number }): Promise<File> {
   if (!file.type.startsWith("image/")) {
     return file
   }
