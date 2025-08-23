@@ -2,7 +2,6 @@
 import { User } from "lucide-react"
 import { Tooltip, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import type { Server, Channel } from "@/lib/types"
-import { channelsByServer } from "@/lib/data"
 
 interface ServerListProps {
   servers: Server[]
@@ -10,6 +9,7 @@ interface ServerListProps {
   setActiveServer: (server: Server) => void
   setActiveChannel: (channel: Channel) => void
   onOpenDMs: () => void
+  onAddServer: () => void
   unreadDMCount?: number
 }
 
@@ -19,15 +19,11 @@ export function ServerList({
   setActiveServer,
   setActiveChannel,
   onOpenDMs,
+  onAddServer,
   unreadDMCount = 0,
 }: ServerListProps) {
   const handleServerClick = (server: Server) => {
     setActiveServer(server)
-    // Set the first channel of the first section as active
-    const firstChannel = channelsByServer[server.id]?.[0]?.channels?.[0]
-    if (firstChannel) {
-      setActiveChannel(firstChannel)
-    }
   }
 
   return (
@@ -67,19 +63,52 @@ export function ServerList({
               <TooltipTrigger asChild>
                 <button
                   onClick={() => handleServerClick(server)}
-                  className={`w-10 h-10 rounded-none flex items-center justify-center text-xs font-bold transition-colors ${
+                  className={`w-10 h-10 rounded-none flex items-center justify-center text-xs font-bold transition-colors overflow-hidden ${
                     activeServer.id === server.id
                       ? "bg-neutral-100 text-neutral-900"
                       : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
                   }`}
                 >
-                  {server.name.charAt(0)}
+                  {server.logo ? (
+                    <img
+                      src={server.logo || "/placeholder.svg"}
+                      alt={server.name}
+                      className="w-full h-full object-cover"
+                      onError={(e) => {
+                        // Fallback to first letter if image fails to load
+                        const target = e.target as HTMLImageElement
+                        target.style.display = "none"
+                        target.nextElementSibling!.textContent = server.name.charAt(0)
+                      }}
+                    />
+                  ) : (
+                    server.name.charAt(0)
+                  )}
+                  <span className="hidden">{server.name.charAt(0)}</span>
                 </button>
               </TooltipTrigger>
             </Tooltip>
           </TooltipProvider>
         ))}
       </div>
+
+      {/* Separator line before add button */}
+      <div className="w-8 h-px bg-neutral-800 mb-3"></div>
+
+      {/* Add Server Button */}
+      <TooltipProvider>
+        <Tooltip delayDuration={300}>
+          <TooltipTrigger asChild>
+            <button
+              onClick={onAddServer}
+              className="w-10 h-10 bg-neutral-800 hover:bg-neutral-700 rounded-none flex items-center justify-center text-neutral-400 hover:text-neutral-200 transition-colors"
+              title="Add Server"
+            >
+              <span className="text-lg font-bold">+</span>
+            </button>
+          </TooltipTrigger>
+        </Tooltip>
+      </TooltipProvider>
 
       {/* Spacer */}
       <div className="flex-1" />

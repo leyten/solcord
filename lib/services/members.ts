@@ -4,38 +4,92 @@ import type { RealtimeChannel } from "@supabase/supabase-js"
 
 const supabase = createClient()
 
+// GLOBAL SINGLETON STATE - ONLY ONE SERVER CAN BE ACTIVE
+let ACTIVE_SERVER_ID: string | null = null
+let ACTIVE_CALLBACK: ((members: ChannelUser[]) => void) | null = null
+let ACTIVE_SUBSCRIPTION: RealtimeChannel | null = null
+let ACTIVE_HEARTBEAT: NodeJS.Timeout | null = null
+
 class MembersService {
-  private subscriptions = new Map<string, RealtimeChannel>()
   private memberCache = new Map<string, ChannelUser[]>()
-  private subscriberCallbacks = new Map<string, (members: ChannelUser[]) => void>()
 
   async getServerMembers(serverId: string): Promise<ChannelUser[]> {
     try {
       console.log(`👥 Fetching server members for: ${serverId}`)
 
-      const { data: profiles, error } = await supabase
-        .from("profiles")
-        .select("id, username, name, pfp_url, status, updated_at")
-        .order("name")
+      // Check if this is the default Solcord server - show all users
+      if (serverId === "solcord") {
+        const { data: profiles, error } = await supabase
+          .from("profiles")
+          .select("id, username, name, pfp_url, status, updated_at")
+          .order("name")
+
+        if (error) {
+          console.error("❌ Error fetching Solcord members:", error)
+          return []
+        }
+
+        const members = profiles.map((profile: any) => ({
+          id: profile.id,
+          name: profile.name || profile.username || "Unknown User",
+          online: profile.status === "online",
+          activity: profile.status === "online" ? "Active" : profile.status === "dnd" ? "Do Not Disturb" : undefined,
+          lastSeen: profile.status === "online" ? "now" : this.formatLastSeen(profile.updated_at),
+          avatar: profile.pfp_url || "",
+          status: profile.status || "offline",
+        }))
+
+        console.log(`✅ Fetched ${members.length} Solcord members`)
+        this.memberCache.set(serverId, members)
+        return members
+      }
+
+      // For token servers, only show members who have joined that specific server
+      const { data: serverMembers, error } = await supabase
+        .from("server_memberships")
+        .select(`
+          user_id,
+          role,
+          joined_at,
+          profiles!server_memberships_user_id_fkey (
+            id,
+            username,
+            name,
+            pfp_url,
+            status,
+            updated_at
+          )
+        `)
+        .eq("server_id", serverId)
+        .order("joined_at", { ascending: true })
 
       if (error) {
         console.error("❌ Error fetching server members:", error)
         return []
       }
 
-      const members = profiles.map((profile: any) => ({
-        id: profile.id,
-        name: profile.name || profile.username || "Unknown User",
-        online: profile.status === "online",
-        activity: profile.status === "online" ? "Active" : profile.status === "dnd" ? "Do Not Disturb" : undefined,
-        lastSeen: profile.status === "online" ? "now" : this.formatLastSeen(profile.updated_at),
-        avatar: profile.pfp_url || "",
-        status: profile.status || "offline",
-      }))
+      const members = (serverMembers || [])
+        .filter((membership: any) => membership.profiles)
+        .map((membership: any) => ({
+          id: membership.profiles.id,
+          name: membership.profiles.name || membership.profiles.username || "Unknown User",
+          online: membership.profiles.status === "online",
+          activity:
+            membership.profiles.status === "online"
+              ? "Active"
+              : membership.profiles.status === "dnd"
+                ? "Do Not Disturb"
+                : undefined,
+          lastSeen:
+            membership.profiles.status === "online" ? "now" : this.formatLastSeen(membership.profiles.updated_at),
+          avatar: membership.profiles.pfp_url || "",
+          status: membership.profiles.status || "offline",
+        }))
 
-      console.log(`✅ Fetched ${members.length} members, online: ${members.filter((m) => m.online).length}`)
+      console.log(
+        `✅ Fetched ${members.length} members for server ${serverId}, online: ${members.filter((m) => m.online).length}`,
+      )
 
-      // Cache the members
       this.memberCache.set(serverId, members)
       return members
     } catch (error) {
@@ -44,132 +98,150 @@ class MembersService {
     }
   }
 
-  // Force refresh members and notify all subscribers
   async forceRefreshMembers(serverId: string): Promise<ChannelUser[]> {
     console.log(`🔄 Force refreshing members for server: ${serverId}`)
     const members = await this.getServerMembers(serverId)
 
-    // Notify all active subscriptions for this server
-    this.notifySubscribers(serverId, members)
+    if (ACTIVE_SERVER_ID === serverId && ACTIVE_CALLBACK) {
+      ACTIVE_CALLBACK(members)
+    }
 
     return members
   }
 
-  private notifySubscribers(serverId: string, members: ChannelUser[]) {
-    const callback = this.subscriberCallbacks.get(serverId)
-    if (callback) {
-      console.log(`📢 Notifying subscribers for server ${serverId} with ${members.length} members`)
-      callback(members)
-    }
-  }
-
   subscribeToMemberUpdates(serverId: string, callback: (members: ChannelUser[]) => void): RealtimeChannel {
-    console.log(`🔌 Setting up real-time subscription for server members: ${serverId}`)
+    console.log(`🔌 NEW SUBSCRIPTION REQUEST for server: ${serverId}`)
 
-    // Store the callback for manual notifications
-    this.subscriberCallbacks.set(serverId, callback)
+    // KILL EVERYTHING FIRST
+    this.destroyEverything()
 
-    // Clean up existing subscription if any
-    const existingSubscription = this.subscriptions.get(serverId)
-    if (existingSubscription) {
-      console.log(`🧹 Cleaning up existing subscription for server: ${serverId}`)
-      supabase.removeChannel(existingSubscription)
-    }
+    // SET NEW ACTIVE STATE
+    ACTIVE_SERVER_ID = serverId
+    ACTIVE_CALLBACK = callback
 
-    // Create unique channel name with timestamp
-    const channelName = `server-members-${serverId}-${Date.now()}`
-    console.log(`📡 Creating real-time channel: ${channelName}`)
+    console.log(`✅ ACTIVE SERVER SET TO: ${ACTIVE_SERVER_ID}`)
+
+    // CREATE SUBSCRIPTION
+    const channelName = `members-${serverId}-${Date.now()}`
+    console.log(`📡 Creating subscription: ${channelName}`)
 
     const subscription = supabase
       .channel(channelName)
       .on(
         "postgres_changes",
         {
-          event: "*", // Listen to all events (INSERT, UPDATE, DELETE)
+          event: "*",
           schema: "public",
           table: "profiles",
         },
         async (payload: any) => {
-          console.log(`🔄 Real-time profiles change detected:`, {
-            eventType: payload.eventType,
-            userId: payload.new?.id || payload.old?.id,
-            newStatus: payload.new?.status,
-            oldStatus: payload.old?.status,
-          })
+          // ONLY process if this is STILL the active server
+          if (ACTIVE_SERVER_ID !== serverId) {
+            console.log(`🚫 IGNORING profiles change - active server is ${ACTIVE_SERVER_ID}, not ${serverId}`)
+            return
+          }
 
-          // Get fresh data from database
+          console.log(`🔄 Profiles change for ACTIVE server ${serverId}`)
           const updatedMembers = await this.getServerMembers(serverId)
 
-          // Notify the callback
-          callback(updatedMembers)
+          if (ACTIVE_CALLBACK && ACTIVE_SERVER_ID === serverId) {
+            ACTIVE_CALLBACK(updatedMembers)
+          }
+        },
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "server_memberships",
+          filter: `server_id=eq.${serverId}`,
+        },
+        async (payload: any) => {
+          // ONLY process if this is STILL the active server
+          if (ACTIVE_SERVER_ID !== serverId) {
+            console.log(`🚫 IGNORING membership change - active server is ${ACTIVE_SERVER_ID}, not ${serverId}`)
+            return
+          }
+
+          console.log(`🔄 Membership change for ACTIVE server ${serverId}`)
+          const updatedMembers = await this.getServerMembers(serverId)
+
+          if (ACTIVE_CALLBACK && ACTIVE_SERVER_ID === serverId) {
+            ACTIVE_CALLBACK(updatedMembers)
+          }
         },
       )
       .subscribe((status, err) => {
-        console.log(`📡 Subscription status for ${channelName}:`, status)
-
         if (err) {
-          console.error(`❌ Subscription error for ${channelName}:`, err)
+          console.error(`❌ Subscription error:`, err)
         }
-
         if (status === "SUBSCRIBED") {
-          console.log(`✅ Successfully subscribed to member updates for server: ${serverId}`)
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          console.error(`❌ Subscription failed for server ${serverId}, attempting reconnect...`)
-          this.handleReconnect(serverId, callback)
+          console.log(`✅ Successfully subscribed to ${serverId}`)
         }
       })
 
-    this.subscriptions.set(serverId, subscription)
+    ACTIVE_SUBSCRIPTION = subscription
 
-    // Set up a heartbeat to ensure connection stays alive
-    this.setupHeartbeat(serverId, callback)
+    // START HEARTBEAT
+    this.startHeartbeat()
 
     return subscription
   }
 
-  private handleReconnect(serverId: string, callback: (members: ChannelUser[]) => void) {
-    console.log(`🔄 Attempting to reconnect member subscription for server: ${serverId}`)
+  private startHeartbeat() {
+    console.log(`💓 Starting heartbeat for ACTIVE server: ${ACTIVE_SERVER_ID}`)
 
-    setTimeout(() => {
-      this.subscribeToMemberUpdates(serverId, callback)
-    }, 2000)
-  }
-
-  private setupHeartbeat(serverId: string, callback: (members: ChannelUser[]) => void) {
-    console.log(`💓 Setting up heartbeat for server: ${serverId}`)
-
-    // Refresh every 30 seconds as a fallback
-    const heartbeatInterval = setInterval(async () => {
-      const subscription = this.subscriptions.get(serverId)
-      if (!subscription) {
-        console.log(`💓 Heartbeat stopped for server ${serverId} - no subscription`)
-        clearInterval(heartbeatInterval)
+    ACTIVE_HEARTBEAT = setInterval(async () => {
+      if (!ACTIVE_SERVER_ID) {
+        console.log(`💓 No active server, killing heartbeat`)
+        if (ACTIVE_HEARTBEAT) {
+          clearInterval(ACTIVE_HEARTBEAT)
+          ACTIVE_HEARTBEAT = null
+        }
         return
       }
 
-      console.log(`💓 Heartbeat refresh for server: ${serverId}`)
-      const members = await this.getServerMembers(serverId)
-      callback(members)
-    }, 30000)
+      console.log(`💓 Heartbeat for ACTIVE server: ${ACTIVE_SERVER_ID}`)
+      const members = await this.getServerMembers(ACTIVE_SERVER_ID)
 
-    // Store interval for cleanup
-    ;(this.subscriptions.get(serverId) as any)._heartbeatInterval = heartbeatInterval
+      if (ACTIVE_CALLBACK) {
+        ACTIVE_CALLBACK(members)
+      }
+    }, 30000)
+  }
+
+  private destroyEverything() {
+    console.log(`💀 DESTROYING EVERYTHING`)
+
+    // Kill heartbeat
+    if (ACTIVE_HEARTBEAT) {
+      console.log(`💀 Killing heartbeat for: ${ACTIVE_SERVER_ID}`)
+      clearInterval(ACTIVE_HEARTBEAT)
+      ACTIVE_HEARTBEAT = null
+    }
+
+    // Kill subscription
+    if (ACTIVE_SUBSCRIPTION) {
+      console.log(`💀 Killing subscription for: ${ACTIVE_SERVER_ID}`)
+      try {
+        supabase.removeChannel(ACTIVE_SUBSCRIPTION)
+      } catch (error) {
+        console.error("Error removing subscription:", error)
+      }
+      ACTIVE_SUBSCRIPTION = null
+    }
+
+    // Clear state
+    ACTIVE_SERVER_ID = null
+    ACTIVE_CALLBACK = null
+
+    console.log(`💀 EVERYTHING DESTROYED`)
   }
 
   unsubscribeFromMemberUpdates(subscription: RealtimeChannel): void {
-    if (subscription) {
-      console.log(`🔌 Unsubscribing from member updates`)
-
-      // Clean up intervals
-      const heartbeatInterval = (subscription as any)._heartbeatInterval
-
-      if (heartbeatInterval) {
-        console.log(`🧹 Cleaning up heartbeat interval`)
-        clearInterval(heartbeatInterval)
-      }
-
-      supabase.removeChannel(subscription)
-    }
+    console.log(`🔌 Unsubscribing from member updates`)
+    this.destroyEverything()
   }
 
   private formatLastSeen(timestamp: string): string {

@@ -4,6 +4,7 @@ import { compressImage } from "@/lib/utils/file-compression"
 export interface FeedPost {
   id: string
   channel_id: string
+  server_id: string // 🔥 ENSURE SERVER_ID IS INCLUDED
   author_id: string
   content: string | null
   attachments: any[]
@@ -39,6 +40,7 @@ export interface FeedComment {
 
 export interface CreatePostData {
   channel_id: string
+  server_id: string // 🔥 NEW REQUIRED FIELD
   content?: string
   attachments?: File[]
   userId?: string
@@ -66,8 +68,16 @@ class FeedService {
     }
   }
 
-  async getPosts(channelId: string, sortBy: "latest" | "top" = "latest", userId?: string): Promise<FeedPost[]> {
+  // GET POSTS - NOW SERVER-AWARE
+  async getPosts(
+    channelId: string,
+    serverId: string,
+    sortBy: "latest" | "top" = "latest",
+    userId?: string,
+  ): Promise<FeedPost[]> {
     try {
+      console.log(`📰 Fetching posts for server: ${serverId}, channel: ${channelId}`)
+
       // Set user context if available
       if (userId) {
         await this.setUserContext(userId)
@@ -84,6 +94,7 @@ class FeedService {
             pfp_url
           )
         `)
+        .eq("server_id", serverId) // 🔥 FILTER BY SERVER
         .eq("channel_id", channelId)
 
       if (sortBy === "latest") {
@@ -99,7 +110,10 @@ class FeedService {
         return []
       }
 
-      if (!posts) return []
+      if (!posts) {
+        console.log(`📭 No posts found for server ${serverId}, channel ${channelId}`)
+        return []
+      }
 
       // Get user reactions for all posts if user is authenticated
       const userReactions: { [key: string]: { liked: boolean; retweeted: boolean } } = {}
@@ -138,6 +152,8 @@ class FeedService {
         }
       }
 
+      console.log(`✅ Loaded ${posts.length} posts for server ${serverId}, channel ${channelId}`)
+
       return posts.map((post) => ({
         ...post,
         profiles: {
@@ -155,7 +171,8 @@ class FeedService {
     }
   }
 
-  async createPost(data: CreatePostData): Promise<FeedPost | null> {
+  // CREATE POST - NOW SERVER-AWARE
+  async createPost(data: CreatePostData, onOptimisticUpdate?: (post: FeedPost) => void): Promise<FeedPost | null> {
     try {
       const userId = data.userId
 
@@ -163,6 +180,8 @@ class FeedService {
         console.error("User not authenticated - userId is required")
         return null
       }
+
+      console.log(`📝 Creating post for server: ${data.server_id}, channel: ${data.channel_id}`)
 
       // Set user context for RLS
       await this.setUserContext(userId)
@@ -198,7 +217,6 @@ class FeedService {
             // Get public URL
             const { data: urlData } = this.supabase.storage.from("message-attachments").getPublicUrl(fileName)
 
-            // Use the correct format that matches the existing data structure
             attachments.push({
               id: Date.now().toString(),
               filename: file.name,
@@ -214,42 +232,52 @@ class FeedService {
         }
       }
 
-      // Create the post
-      const { data: post, error } = await this.supabase
-        .from("feed_posts")
-        .insert({
-          channel_id: data.channel_id,
-          author_id: userId,
-          content: data.content || null,
-          attachments: attachments,
-        })
-        .select(`
-          *,
-          profiles:author_id (
-            id,
-            username,
-            name,
-            pfp_url
-          )
-        `)
-        .single()
+      // Create optimistic post for immediate UI update
+      const optimisticPost: FeedPost = {
+        id: `temp-${Date.now()}`, // Temporary ID
+        channel_id: data.channel_id,
+        server_id: data.server_id,
+        author_id: userId,
+        content: data.content || null,
+        attachments: attachments,
+        likes_count: 0,
+        retweets_count: 0,
+        replies_count: 0,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        profiles: {
+          id: userId,
+          username: "You", // Placeholder
+          display_name: "You",
+          avatar_url: null,
+        },
+        user_liked: false,
+        user_retweeted: false,
+      }
+
+      // Call optimistic update callback if provided
+      if (onOptimisticUpdate) {
+        onOptimisticUpdate(optimisticPost)
+      }
+
+      // Create the post in database (async - real post will come via real-time)
+      const { error } = await this.supabase.from("feed_posts").insert({
+        channel_id: data.channel_id,
+        server_id: data.server_id,
+        author_id: userId,
+        content: data.content || null,
+        attachments: attachments,
+      })
 
       if (error) {
         console.error("Error creating post:", error)
         return null
       }
 
-      return {
-        ...post,
-        profiles: {
-          id: post.profiles.id,
-          username: post.profiles.username,
-          display_name: post.profiles.name,
-          avatar_url: post.profiles.pfp_url,
-        },
-        user_liked: false,
-        user_retweeted: false,
-      }
+      console.log(`✅ Post created for server ${data.server_id} (real post will come via real-time)`)
+
+      // Return optimistic post for immediate UI feedback
+      return optimisticPost
     } catch (error) {
       console.error("Error in createPost:", error)
       return null
@@ -399,19 +427,24 @@ class FeedService {
     }
   }
 
-  subscribeToPostUpdates(channelId: string, callback: (post: FeedPost) => void, userId?: string) {
+  // SUBSCRIBE TO POST UPDATES - NOW SERVER-AWARE
+  subscribeToPostUpdates(channelId: string, serverId: string, callback: (post: FeedPost) => void, userId?: string) {
+    console.log(`🔌 Setting up feed subscription for server: ${serverId}, channel: ${channelId}`)
+
     return this.supabase
-      .channel(`feed_posts_${channelId}`)
+      .channel(`feed_posts_${serverId}_${channelId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
           schema: "public",
           table: "feed_posts",
-          filter: `channel_id=eq.${channelId}`,
+          filter: `server_id=eq.${serverId}.and.channel_id=eq.${channelId}`, // 🔥 FILTER BY BOTH
         },
         async (payload) => {
           if (payload.eventType === "INSERT" && payload.new) {
+            console.log(`📰 New post received for server ${serverId}:`, payload.new.id)
+
             // Fetch the complete post with profile data
             const { data: post } = await this.supabase
               .from("feed_posts")

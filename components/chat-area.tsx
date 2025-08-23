@@ -8,13 +8,14 @@ import { VoiceChat } from "@/components/voice-chat"
 import { Feed } from "@/components/feed"
 import { MessageItem } from "@/components/messages/message-item"
 import { ProfileView } from "@/components/profile-view"
-import type { Channel, ChannelUser } from "@/lib/types"
+import type { Channel, ChannelUser, Server } from "@/lib/types"
 import type { Message } from "@/lib/types/messages"
 import { Textarea } from "@/components/ui/textarea"
 import { messagesService } from "@/lib/services/messages"
 import { useProfile } from "@/contexts/profile-context"
 
 interface ChatAreaProps {
+  server: Server
   channel: Channel
   messages: Message[]
   users: ChannelUser[]
@@ -23,7 +24,7 @@ interface ChatAreaProps {
   onOpenSettings?: () => void
 }
 
-export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
+export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [hasMore, setHasMore] = useState(false)
@@ -37,18 +38,18 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const { profile } = useProfile()
 
-  // Load messages when channel changes
+  // Load messages when channel OR SERVER changes
   useEffect(() => {
-    if (!channel?.id) return
+    if (!channel?.id || !server?.id) return
 
-    console.log(`🔄 Loading messages for channel: ${channel.id}`)
+    console.log(`🔄 Loading messages for server: ${server.id}, channel: ${channel.id}`)
 
     const loadMessages = async () => {
       setIsLoading(true)
       setError(null)
       try {
-        const result = await messagesService.getChannelMessages(channel.id)
-        console.log(`📥 Loaded ${result.messages.length} messages for ${channel.id}`)
+        const result = await messagesService.getChannelMessages(channel.id, server.id)
+        console.log(`📥 Loaded ${result.messages.length} messages for ${server.id}/${channel.id}`)
         setMessages(result.messages)
         setHasMore(result.hasMore)
 
@@ -69,8 +70,8 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
     loadMessages()
 
     // Subscribe to real-time updates with proper callbacks
-    console.log(`🔌 Setting up real-time subscription for: ${channel.id}`)
-    const subscription = messagesService.subscribeToChannel(channel.id, {
+    console.log(`🔌 Setting up real-time subscription for: ${server.id}/${channel.id}`)
+    const subscription = messagesService.subscribeToChannel(channel.id, server.id, {
       onInsert: (newMessage) => {
         console.log("📨 New message received via real-time:", newMessage.author.name, "->", newMessage.content)
         setMessages((prev) => {
@@ -104,10 +105,10 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
 
     // Cleanup function - only unsubscribe when component unmounts or channel changes
     return () => {
-      console.log(`🧹 Cleaning up subscription for: ${channel.id}`)
-      messagesService.unsubscribeFromChannel(channel.id)
+      console.log(`🧹 Cleaning up subscription for: ${server.id}/${channel.id}`)
+      messagesService.unsubscribeFromChannel(channel.id, server.id)
     }
-  }, [channel.id])
+  }, [channel.id, server.id])
 
   // Load more messages when scrolling to top
   const handleScroll = async () => {
@@ -119,7 +120,7 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
       try {
         const oldestMessage = messages[0]
         if (oldestMessage) {
-          const result = await messagesService.getChannelMessages(channel.id, 25, oldestMessage.created_at)
+          const result = await messagesService.getChannelMessages(channel.id, server.id, 25, oldestMessage.created_at)
           setMessages((prev) => [...result.messages, ...prev])
           setHasMore(result.hasMore)
         }
@@ -147,7 +148,7 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
       const success = await messagesService.deleteMessage(messageId)
       if (!success) {
         // Revert optimistic update on failure
-        const result = await messagesService.getChannelMessages(channel.id)
+        const result = await messagesService.getChannelMessages(channel.id, server.id)
         setMessages(result.messages)
         alert("Failed to delete message")
       }
@@ -173,7 +174,7 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
       setEditingMessage(null)
     } else {
       // Revert optimistic update on failure
-      const result = await messagesService.getChannelMessages(channel.id)
+      const result = await messagesService.getChannelMessages(channel.id, server.id)
       setMessages(result.messages)
       alert("Failed to edit message")
     }
@@ -197,7 +198,7 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
   }
 
   if (channel.type === "feed") {
-    return <Feed channel={channel} users={users} />
+    return <Feed server={server} channel={channel} users={users} />
   }
 
   return (
@@ -301,13 +302,31 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
       {/* Input */}
       <div className="p-4 border-t border-neutral-800 bg-neutral-925">
         <ChatInput
+          server={server}
           channel={channel}
           replyingTo={replyingTo}
           onMessageSent={(message) => {
             console.log("📤 Message sent callback triggered:", message.content)
             setReplyingTo(null)
-            // Don't add optimistically - let real-time subscription handle it
-            // This prevents duplicate messages
+            // OPTIMISTIC UPDATE - ADD MESSAGE IMMEDIATELY
+            setMessages((prev) => {
+              // Check if message already exists to avoid duplicates
+              if (prev.some((msg) => msg.id === message.id)) {
+                console.log("⚠️ Duplicate message detected in optimistic update, skipping")
+                return prev
+              }
+              console.log("✅ Adding optimistic message to state")
+              const newMessages = [...prev, message]
+
+              // Auto-scroll to bottom
+              setTimeout(() => {
+                if (messagesContainerRef.current) {
+                  messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+                }
+              }, 50)
+
+              return newMessages
+            })
           }}
         />
       </div>
@@ -350,12 +369,13 @@ export function ChatArea({ channel, users, onOpenSettings }: ChatAreaProps) {
 }
 
 interface ChatInputProps {
+  server: Server
   channel: Channel
   replyingTo?: Message | null
   onMessageSent?: (message: Message) => void
 }
 
-function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
+function ChatInput({ server, channel, replyingTo, onMessageSent }: ChatInputProps) {
   const [message, setMessage] = useState("")
   const [showMentions, setShowMentions] = useState(false)
   const [isSending, setIsSending] = useState(false)
@@ -429,7 +449,7 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
   const handleSend = async () => {
     if ((!message.trim() && attachedFiles.length === 0) || isSending || !profile?.id || cooldownRemaining > 0) return
 
-    console.log(`📤 Attempting to send message: "${message.trim()}" to channel: ${channel.id}`)
+    console.log(`📤 Attempting to send message: "${message.trim()}" to server: ${server.id}, channel: ${channel.id}`)
 
     setIsSending(true)
     setSpamError(null)
@@ -448,8 +468,8 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
         setUploadingFiles(false)
       }
 
-      // Send message with spam prevention
-      const result = await messagesService.sendMessage(channel.id, profile.id, {
+      // Send message with spam prevention - NOW PASS SERVER ID
+      const result = await messagesService.sendMessage(channel.id, server.id, profile.id, {
         content: message.trim() || undefined,
         attachments: attachments.length > 0 ? attachments : undefined,
         reply_to: replyingTo?.id,
@@ -459,6 +479,8 @@ function ChatInput({ channel, replyingTo, onMessageSent }: ChatInputProps) {
         console.log("✅ Message sent successfully:", result.message.content)
         setMessage("")
         setAttachedFiles([])
+
+        // CALL CALLBACK WITH OPTIMISTIC MESSAGE
         if (onMessageSent) {
           onMessageSent(result.message)
         }

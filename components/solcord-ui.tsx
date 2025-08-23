@@ -8,26 +8,115 @@ import { UserList } from "@/components/user-list"
 import { Settings } from "@/components/settings"
 import { DirectMessages } from "@/components/direct-messages"
 import { ProfileView } from "@/components/profile-view"
+import { ServerSearchModal } from "@/components/server-search-modal"
 import { ProfileProvider } from "@/contexts/profile-context"
-import { servers, channelsByServer } from "@/lib/data"
-import type { Server, Channel, ChannelUser } from "@/lib/types"
+import { servers } from "@/lib/data"
+import type { Server, Channel, ChannelUser, ChannelSection } from "@/lib/types"
 import { membersService } from "@/lib/services/members"
 import { dmService } from "@/lib/services/direct-messages"
+import { tokenServerService } from "@/lib/services/token-servers"
+import { channelsService } from "@/lib/services/channels"
 import { useProfile } from "@/contexts/profile-context"
 
 function SolcordUIInner() {
   const [activeServer, setActiveServer] = useState<Server>(servers[0])
-  const [activeChannel, setActiveChannel] = useState<Channel>(channelsByServer[activeServer.id][0].channels[0])
+  const [dynamicChannelsByServer, setDynamicChannelsByServer] = useState<Record<string, ChannelSection[]>>({})
+
+  // Safe initialization of activeChannel
+  const getInitialChannel = (serverId: string) => {
+    const serverChannels = dynamicChannelsByServer[serverId]
+    if (serverChannels && serverChannels.length > 0 && serverChannels[0].channels.length > 0) {
+      return serverChannels[0].channels[0]
+    }
+    // Fallback to a default channel structure
+    return {
+      id: "general",
+      name: "general",
+      type: "text" as const,
+      description: "General discussion",
+    }
+  }
+
+  const [activeChannel, setActiveChannel] = useState<Channel>(getInitialChannel(servers[0].id))
   const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
   const [userListCollapsed, setUserListCollapsed] = useState(false)
   const [showDMs, setShowDMs] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showServerSearch, setShowServerSearch] = useState(false)
   const [serverMembers, setServerMembers] = useState<ChannelUser[]>([])
   const [isLoadingMembers, setIsLoadingMembers] = useState(false)
   const [selectedUser, setSelectedUser] = useState<ChannelUser | null>(null)
   const [showProfileView, setShowProfileView] = useState(false)
   const [unreadDMCount, setUnreadDMCount] = useState(0)
+  const [userServers, setUserServers] = useState<any[]>([])
+  const [allServers, setAllServers] = useState<Server[]>(servers)
   const { profile } = useProfile()
+
+  // Load channels for a specific server
+  const loadServerChannels = useCallback(async (serverId: string) => {
+    try {
+      console.log(`📋 Loading channels for server: ${serverId}`)
+      const channels = await channelsService.getServerChannels(serverId)
+
+      setDynamicChannelsByServer((prev) => ({
+        ...prev,
+        [serverId]: channels,
+      }))
+
+      console.log(`✅ Loaded channels for server ${serverId}:`, channels)
+    } catch (error) {
+      console.error(`❌ Failed to load channels for server ${serverId}:`, error)
+    }
+  }, [])
+
+  // Load user's token servers
+  const loadUserServers = useCallback(async () => {
+    if (!profile?.id) return
+
+    try {
+      const tokenServers = await tokenServerService.getUserServers(profile.id)
+      console.log("Loaded user servers:", tokenServers)
+      setUserServers(tokenServers)
+
+      // Create server objects for token servers
+      const tokenServerObjects = tokenServers.map((tokenServer) => ({
+        id: tokenServer.id,
+        name: tokenServer.name,
+        logo: tokenServer.logo_url,
+        icon: tokenServer.logo_url,
+      }))
+
+      // Combine default servers with user's token servers
+      const combinedServers = [...servers, ...tokenServerObjects]
+      setAllServers(combinedServers)
+
+      // Load channels for all servers (including token servers)
+      for (const server of combinedServers) {
+        await loadServerChannels(server.id)
+      }
+    } catch (error) {
+      console.error("Error loading user servers:", error)
+    }
+  }, [profile?.id, loadServerChannels])
+
+  // Load user servers and channels on profile load
+  useEffect(() => {
+    loadUserServers()
+  }, [loadUserServers])
+
+  // Update active channel when server changes
+  useEffect(() => {
+    if (activeServer?.id) {
+      const serverChannels = dynamicChannelsByServer[activeServer.id]
+      if (serverChannels && serverChannels.length > 0 && serverChannels[0].channels.length > 0) {
+        setActiveChannel(serverChannels[0].channels[0])
+        console.log(`🔄 Switched to server ${activeServer.id}, channel: ${serverChannels[0].channels[0].name}`)
+      } else {
+        // Load channels for this server if not loaded yet
+        loadServerChannels(activeServer.id)
+      }
+    }
+  }, [activeServer, dynamicChannelsByServer, loadServerChannels])
 
   // Load members when server changes (not channel)
   useEffect(() => {
@@ -36,8 +125,10 @@ function SolcordUIInner() {
     const loadMembers = async () => {
       setIsLoadingMembers(true)
       try {
+        console.log(`👥 Loading members for server: ${activeServer.id}`)
         const members = await membersService.getServerMembers(activeServer.id)
         setServerMembers(members)
+        console.log(`✅ Loaded ${members.length} members for server ${activeServer.id}`)
       } catch (error) {
         console.error("❌ Failed to load server members:", error)
         setServerMembers([])
@@ -50,13 +141,14 @@ function SolcordUIInner() {
 
     // Subscribe to real-time member updates for this server
     const subscription = membersService.subscribeToMemberUpdates(activeServer.id, (updatedMembers) => {
+      console.log(`👥 Real-time member update for server ${activeServer.id}:`, updatedMembers.length)
       setServerMembers(updatedMembers)
     })
 
     return () => {
       membersService.unsubscribeFromMemberUpdates(subscription)
     }
-  }, [activeServer.id]) // Only depend on server, not channel
+  }, [activeServer.id])
 
   // Load unread DM count - this gets the total from all conversations
   const loadUnreadDMCount = useCallback(async () => {
@@ -122,13 +214,20 @@ function SolcordUIInner() {
 
   const handleOpenDMs = () => {
     setShowDMs(true)
-    // Don't clear the count here - let the DM component handle individual conversation clearing
   }
 
   const handleCloseDMs = () => {
     setShowDMs(false)
-    // Refresh unread count when closing DMs to get the updated totals
     loadUnreadDMCount()
+  }
+
+  const handleOpenServerSearch = () => {
+    setShowServerSearch(true)
+  }
+
+  const handleCloseServerSearch = () => {
+    setShowServerSearch(false)
+    loadUserServers()
   }
 
   // Handle notification updates from the DM component
@@ -151,6 +250,10 @@ function SolcordUIInner() {
         }
         if (showDMs) {
           setShowDMs(false)
+          return
+        }
+        if (showServerSearch) {
+          setShowServerSearch(false)
           return
         }
       }
@@ -186,7 +289,9 @@ function SolcordUIInner() {
       // Alt + Up/Down for channel navigation
       if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
         e.preventDefault()
-        const currentChannels = channelsByServer[activeServer.id]
+        const currentChannels = dynamicChannelsByServer[activeServer.id]
+        if (!currentChannels) return
+
         const allChannels = currentChannels.flatMap((section) => section.channels)
         const currentIndex = allChannels.findIndex((ch) => ch.id === activeChannel.id)
 
@@ -201,21 +306,32 @@ function SolcordUIInner() {
 
     document.addEventListener("keydown", handleKeyDown)
     return () => document.removeEventListener("keydown", handleKeyDown)
-  }, [showSettings, showDMs, showProfileView, channelSidebarCollapsed, userListCollapsed, activeServer, activeChannel])
+  }, [
+    showSettings,
+    showDMs,
+    showProfileView,
+    showServerSearch,
+    channelSidebarCollapsed,
+    userListCollapsed,
+    activeServer,
+    activeChannel,
+    dynamicChannelsByServer,
+  ])
 
   return (
     <div className="flex h-screen bg-neutral-950">
       <ServerList
-        servers={servers}
+        servers={allServers}
         activeServer={activeServer}
         setActiveServer={setActiveServer}
         setActiveChannel={setActiveChannel}
         onOpenDMs={handleOpenDMs}
+        onAddServer={handleOpenServerSearch}
         unreadDMCount={unreadDMCount}
       />
       <ChannelSidebar
         server={activeServer}
-        channels={channelsByServer[activeServer.id]}
+        channels={dynamicChannelsByServer[activeServer.id] || []}
         activeChannel={activeChannel}
         setActiveChannel={setActiveChannel}
         collapsed={channelSidebarCollapsed}
@@ -223,6 +339,7 @@ function SolcordUIInner() {
         onOpenSettings={() => setShowSettings(true)}
       />
       <ChatArea
+        server={activeServer}
         channel={activeChannel}
         messages={[]}
         users={serverMembers}
@@ -239,6 +356,7 @@ function SolcordUIInner() {
       />
       {showDMs && <DirectMessages onClose={handleCloseDMs} onNotificationUpdate={handleDMNotificationUpdate} />}
       {showSettings && <Settings onClose={() => setShowSettings(false)} />}
+      {showServerSearch && <ServerSearchModal onClose={handleCloseServerSearch} />}
       {showProfileView && (
         <ProfileView user={selectedUser} onClose={handleCloseProfileView} onOpenSettings={handleOpenSettings} />
       )}

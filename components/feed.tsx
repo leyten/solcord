@@ -5,18 +5,19 @@ import { useState, useRef, useEffect } from "react"
 import { Heart, MessageCircle, Repeat2, Share, TrendingUp, Clock, Paperclip, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import type { Channel, ChannelUser } from "@/lib/types"
+import type { Channel, ChannelUser, Server } from "@/lib/types"
 import { feedService, type FeedPost } from "@/lib/services/feed"
 import { useProfile } from "@/contexts/profile-context"
 import { PostModal } from "@/components/post-modal"
 import { ProfileView } from "@/components/profile-view"
 
 interface FeedProps {
+  server: Server // 🔥 NEW PROP
   channel: Channel
   users: ChannelUser[]
 }
 
-export function Feed({ channel }: FeedProps) {
+export function Feed({ server, channel }: FeedProps) {
   const { profile } = useProfile()
   const [sortBy, setSortBy] = useState<"top" | "latest">("latest")
   const [newPost, setNewPost] = useState("")
@@ -30,19 +31,36 @@ export function Feed({ channel }: FeedProps) {
 
   const isAnnouncementsChannel = channel.id === "announcements"
 
-  // Load posts when channel or sort changes
+  // Load posts when channel, server, or sort changes
   useEffect(() => {
     loadPosts()
-  }, [channel.id, sortBy, profile?.id])
+  }, [channel.id, server.id, sortBy, profile?.id]) // 🔥 DEPEND ON SERVER TOO
 
   // Subscribe to real-time updates
   useEffect(() => {
-    if (!channel.id) return
+    if (!channel.id || !server.id) return
+
+    console.log(`🔌 Setting up feed subscription for server: ${server.id}, channel: ${channel.id}`)
 
     const subscription = feedService.subscribeToPostUpdates(
       channel.id,
+      server.id, // 🔥 PASS SERVER ID
       (newPost: FeedPost) => {
-        setPosts((prev) => [newPost, ...prev])
+        console.log(`📰 New post received for server ${server.id}:`, newPost.id)
+
+        // Remove any optimistic post with temp ID and add real post
+        setPosts((prev) => {
+          // Remove optimistic posts (temp IDs start with "temp-")
+          const withoutOptimistic = prev.filter((p) => !p.id.startsWith("temp-"))
+
+          // Check if real post already exists
+          const exists = withoutOptimistic.some((p) => p.id === newPost.id)
+          if (exists) {
+            return prev // Don't add duplicate
+          }
+
+          return [newPost, ...withoutOptimistic]
+        })
       },
       profile?.id,
     )
@@ -92,13 +110,15 @@ export function Feed({ channel }: FeedProps) {
       reactionSubscription.unsubscribe()
       commentSubscription.unsubscribe()
     }
-  }, [channel.id, profile?.id, selectedPost])
+  }, [channel.id, server.id, profile?.id, selectedPost]) // 🔥 DEPEND ON SERVER TOO
 
   const loadPosts = async () => {
     setIsLoading(true)
     try {
-      const feedPosts = await feedService.getPosts(channel.id, sortBy, profile?.id)
+      console.log(`📰 Loading posts for server: ${server.id}, channel: ${channel.id}`)
+      const feedPosts = await feedService.getPosts(channel.id, server.id, sortBy, profile?.id) // 🔥 PASS SERVER ID
       setPosts(feedPosts)
+      console.log(`✅ Loaded ${feedPosts.length} posts for server ${server.id}`)
     } catch (error) {
       console.error("Error loading posts:", error)
     } finally {
@@ -125,14 +145,53 @@ export function Feed({ channel }: FeedProps) {
 
     setIsPosting(true)
     try {
+      console.log(`📝 Creating post for server: ${server.id}, channel: ${channel.id}`)
+
+      // Create optimistic post and add to UI immediately
+      const optimisticPost: FeedPost = {
+        id: `temp-${Date.now()}`,
+        channel_id: channel.id,
+        server_id: server.id,
+        author_id: profile.id,
+        content: newPost.trim() || null,
+        attachments:
+          attachedFiles.length > 0
+            ? attachedFiles.map((file) => ({
+                id: `temp-attachment-${Date.now()}`,
+                filename: file.name,
+                size: file.size,
+                content_type: file.type,
+                url: URL.createObjectURL(file),
+              }))
+            : [],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        likes_count: 0,
+        retweets_count: 0,
+        replies_count: 0,
+        user_liked: false,
+        user_retweeted: false,
+        profiles: {
+          id: profile.id,
+          username: profile.username,
+          display_name: profile.name,
+          avatar_url: profile.pfp_url || null,
+        },
+      }
+
+      // Add optimistic post to UI immediately
+      setPosts((prev) => [optimisticPost, ...prev])
+
       const post = await feedService.createPost({
         channel_id: channel.id,
+        server_id: server.id,
         content: newPost.trim() || undefined,
         attachments: attachedFiles.length > 0 ? attachedFiles : undefined,
         userId: profile.id,
       })
 
       if (post) {
+        console.log(`✅ Optimistic post created for server ${server.id}:`, post.id)
         setNewPost("")
         setAttachedFiles([])
       }
