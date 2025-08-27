@@ -1,19 +1,19 @@
 "use client"
 
-import { X, Settings, Calendar, Wallet, Link2, Loader2, Copy, ExternalLink, Coins } from "lucide-react"
+import { X, Settings, Calendar, Wallet, Link2, Loader2, Copy, ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useProfile } from "@/contexts/profile-context"
 import { getUserProfile } from "@/app/actions"
 import { useState, useEffect } from "react"
 import type { ChannelUser } from "@/lib/types"
 import { DirectMessages } from "@/components/direct-messages"
-import { createClient } from "@/lib/supabase/client"
+import { tokenServerService } from "@/lib/services/token-servers"
 
 interface ProfileViewProps {
   user: ChannelUser | null
   onClose: () => void
   onOpenSettings?: () => void
-  currentServerId?: string
+  activeServer?: { id: string; name: string; token_ca?: string }
 }
 
 interface FullProfile {
@@ -29,11 +29,6 @@ interface FullProfile {
   updated_at: string
 }
 
-interface ServerMembership {
-  token_balance: number
-  role: "member" | "guest"
-}
-
 const statusColors = {
   online: "bg-green-500",
   dnd: "bg-red-500",
@@ -46,14 +41,15 @@ const statusLabels = {
   offline: "Offline",
 }
 
-export function ProfileView({ user, onClose, onOpenSettings, currentServerId }: ProfileViewProps) {
+export function ProfileView({ user, onClose, onOpenSettings, activeServer }: ProfileViewProps) {
   const { profile } = useProfile()
   const [fullProfile, setFullProfile] = useState<FullProfile | null>(null)
-  const [serverMembership, setServerMembership] = useState<ServerMembership | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [copiedWallet, setCopiedWallet] = useState(false)
   const [showDirectMessages, setShowDirectMessages] = useState(false)
   const [dmNotificationCount, setDmNotificationCount] = useState(0)
+  const [holdingPercentage, setHoldingPercentage] = useState<number>(0)
+  const [isLoadingHolding, setIsLoadingHolding] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -63,24 +59,6 @@ export function ProfileView({ user, onClose, onOpenSettings, currentServerId }: 
       try {
         const profileData = await getUserProfile(user.id)
         setFullProfile(profileData)
-
-        // Fetch server membership data if we're in a token server (not solcord)
-        if (currentServerId && currentServerId !== "solcord") {
-          const supabase = createClient()
-          const { data: membership, error } = await supabase
-            .from("server_memberships")
-            .select("token_balance, role")
-            .eq("user_id", user.id)
-            .eq("server_id", currentServerId)
-            .maybeSingle()
-
-          if (error) {
-            console.error("Error fetching server membership:", error)
-          } else {
-            console.log("🪙 Server membership data:", membership)
-            setServerMembership(membership)
-          }
-        }
       } catch (error) {
         console.error("Error fetching full profile:", error)
       } finally {
@@ -89,7 +67,26 @@ export function ProfileView({ user, onClose, onOpenSettings, currentServerId }: 
     }
 
     fetchFullProfile()
-  }, [user, currentServerId])
+  }, [user])
+
+  useEffect(() => {
+    if (!user || !activeServer?.id) return
+
+    const fetchHoldingPercentage = async () => {
+      setIsLoadingHolding(true)
+      try {
+        const percentage = await tokenServerService.getUserHoldingPercentage(user.id, activeServer.id)
+        setHoldingPercentage(percentage)
+      } catch (error) {
+        console.error("Error fetching holding percentage:", error)
+        setHoldingPercentage(0)
+      } finally {
+        setIsLoadingHolding(false)
+      }
+    }
+
+    fetchHoldingPercentage()
+  }, [user, activeServer])
 
   // Handle ESC key to close modal
   useEffect(() => {
@@ -171,21 +168,6 @@ export function ProfileView({ user, onClose, onOpenSettings, currentServerId }: 
     }
   }
 
-  const formatTokenHoldings = (tokenBalance: number) => {
-    // Convert from smallest unit back to tokens (assuming 9 decimals for most Solana tokens)
-    const tokens = tokenBalance / Math.pow(10, 9)
-    // Calculate percentage (10 million tokens = 1%)
-    const percentage = (tokens / 10000000) * 100
-
-    if (percentage >= 1) {
-      return `${percentage.toFixed(2)}%`
-    } else if (percentage >= 0.01) {
-      return `${percentage.toFixed(4)}%`
-    } else {
-      return `<0.01%`
-    }
-  }
-
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-neutral-900 border border-neutral-700 w-full max-w-md rounded-none">
@@ -242,36 +224,6 @@ export function ProfileView({ user, onClose, onOpenSettings, currentServerId }: 
             </div>
           ) : (
             <>
-              {/* Token Holdings - Show for token servers and if membership exists */}
-              {currentServerId &&
-                currentServerId !== "solcord" &&
-                serverMembership &&
-                serverMembership.token_balance > 0 && (
-                  <div className="mb-6">
-                    <h3 className="text-sm font-semibold text-neutral-300 mb-2">Token Holdings</h3>
-                    <div className="flex items-center space-x-2 p-3 bg-neutral-800 border border-neutral-700 rounded-none">
-                      <Coins className="w-4 h-4 text-yellow-500 flex-shrink-0" />
-                      <div className="flex-1">
-                        <div className="text-neutral-300 font-medium">
-                          {formatTokenHoldings(serverMembership.token_balance)}
-                        </div>
-                        <div className="text-xs text-neutral-500">
-                          {serverMembership.role === "member" ? "Full Member" : "Guest"}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-              {/* Debug info - remove this later */}
-              {currentServerId && currentServerId !== "solcord" && (
-                <div className="mb-4 p-2 bg-red-900/20 border border-red-700 rounded text-xs">
-                  <div>Server ID: {currentServerId}</div>
-                  <div>User ID: {user.id}</div>
-                  <div>Membership: {serverMembership ? JSON.stringify(serverMembership) : "null"}</div>
-                </div>
-              )}
-
               {/* Bio */}
               {fullProfile?.bio && (
                 <div className="mb-6">
@@ -298,6 +250,27 @@ export function ProfileView({ user, onClose, onOpenSettings, currentServerId }: 
                     </button>
                   </div>
                   {copiedWallet && <p className="text-xs text-green-400 mt-1">Wallet address copied!</p>}
+                </div>
+              )}
+
+              {/* Token Holdings */}
+              {activeServer && (
+                <div className="mb-6">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-neutral-400">
+                      {isLoadingHolding ? (
+                        <div className="flex items-center space-x-2">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>Loading...</span>
+                        </div>
+                      ) : (
+                        <span>
+                          Holding: <span className="text-neutral-300 font-medium">{holdingPercentage.toFixed(3)}%</span>{" "}
+                          in {activeServer.name}
+                        </span>
+                      )}
+                    </span>
+                  </div>
                 </div>
               )}
 

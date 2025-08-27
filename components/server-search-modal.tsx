@@ -7,6 +7,7 @@ import { X, Search, Users, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { tokenServerService } from "@/lib/services/token-servers"
+import { solanaTracker } from "@/lib/services/solana-tracker"
 import { useProfile } from "@/contexts/profile-context"
 
 interface ServerSearchModalProps {
@@ -23,6 +24,8 @@ interface ServerPreview {
     token_ca: string
     decimals: number
   }
+  userBalance: number
+  hasMinimumTokens: boolean
 }
 
 export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
@@ -41,24 +44,49 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
     setServerPreview(null)
 
     try {
-      const result = await tokenServerService.getServerByTokenCA(tokenCA.trim())
-      if (result) {
-        setServerPreview({
-          exists: !!result.id,
-          server: result.id ? result : null,
-          preview: result.id
-            ? undefined
-            : {
-                name: result.name,
-                symbol: result.symbol,
-                logo_url: result.logo_url,
-                token_ca: result.token_ca,
-                decimals: 6, // Default decimals, will be updated from token data
-              },
-        })
-      } else {
-        setError("Token not found or invalid contract address")
+      if (!profile?.primary_wallet) {
+        setError("Wallet not connected")
+        return
       }
+
+      // Fetch both server data and user's wallet balance
+      const [serverResult, walletData] = await Promise.all([
+        tokenServerService.getServerByTokenCA(tokenCA.trim()),
+        solanaTracker.getWalletBalances(profile.primary_wallet),
+      ])
+
+      if (!serverResult) {
+        setError("Token not found or invalid contract address")
+        return
+      }
+
+      if (!walletData) {
+        setError("Could not fetch wallet data")
+        return
+      }
+
+      // Find user's balance for this specific token
+      const userToken = walletData.tokens.find((t) => t.token.mint === tokenCA.trim())
+      const userBalance = userToken?.balance || 0
+
+      const isExistingSolcordServer = serverResult.id === "solcord"
+      const hasMinimumTokens = isExistingSolcordServer || solanaTracker.hasMinimumTokens(userBalance, 6, 10000)
+
+      setServerPreview({
+        exists: !!serverResult.id,
+        server: serverResult.id ? serverResult : null,
+        preview: serverResult.id
+          ? undefined
+          : {
+              name: serverResult.name,
+              symbol: serverResult.symbol,
+              logo_url: serverResult.logo_url,
+              token_ca: serverResult.token_ca,
+              decimals: 6,
+            },
+        userBalance,
+        hasMinimumTokens,
+      })
     } catch (err) {
       setError("Failed to search for server")
       console.error("Search error:", err)
@@ -70,6 +98,12 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
   const handleJoinServer = async () => {
     if (!profile?.id || !profile?.primary_wallet || !tokenCA.trim()) {
       setError("User not authenticated or wallet not found")
+      return
+    }
+
+    const isExistingSolcordServer = serverPreview?.server?.id === "solcord"
+    if (!serverPreview?.hasMinimumTokens && !isExistingSolcordServer) {
+      setError("You need at least 10,000 tokens to create or join this server")
       return
     }
 
@@ -171,18 +205,30 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
                 </div>
               </div>
 
-              <div className="text-sm text-neutral-300">
-                {serverPreview.exists ? (
-                  <p>This server already exists. You can join if you hold at least 10,000 tokens.</p>
+              <div className="text-sm space-y-2">
+                <div className="text-neutral-300">
+                  Your balance: <span className="font-medium">{serverPreview.userBalance.toLocaleString()} tokens</span>
+                </div>
+
+                {serverPreview.hasMinimumTokens ? (
+                  <div className="text-green-400">
+                    {serverPreview.exists ? (
+                      <p>✓ You can join this server (10,000+ tokens required)</p>
+                    ) : (
+                      <p>✓ You can create this server (10,000+ tokens required)</p>
+                    )}
+                  </div>
                 ) : (
-                  <p>This server doesn't exist yet. You can create it if you hold at least 10,000 tokens.</p>
+                  <div className="text-red-400">
+                    <p>✗ You need at least 10,000 tokens to {serverPreview.exists ? "join" : "create"} this server</p>
+                  </div>
                 )}
               </div>
 
               <Button
                 onClick={handleJoinServer}
-                disabled={isJoining}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-none"
+                disabled={isJoining || !serverPreview.hasMinimumTokens}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-none disabled:bg-neutral-600 disabled:cursor-not-allowed"
               >
                 {isJoining ? (
                   <>

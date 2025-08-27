@@ -10,6 +10,7 @@ import { feedService, type FeedPost } from "@/lib/services/feed"
 import { useProfile } from "@/contexts/profile-context"
 import { PostModal } from "@/components/post-modal"
 import { ProfileView } from "@/components/profile-view"
+import { tokenServerService } from "@/lib/services/token-servers"
 
 interface FeedProps {
   server: Server // 🔥 NEW PROP
@@ -27,96 +28,44 @@ export function Feed({ server, channel }: FeedProps) {
   const [isPosting, setIsPosting] = useState(false)
   const [selectedPost, setSelectedPost] = useState<FeedPost | null>(null)
   const [selectedProfile, setSelectedProfile] = useState<any>(null)
+  const [canWrite, setCanWrite] = useState(true)
+  const [isCheckingPermissions, setIsCheckingPermissions] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isAnnouncementsChannel = channel.id === "announcements"
 
-  // Load posts when channel, server, or sort changes
+  useEffect(() => {
+    const checkWritePermissions = async () => {
+      if (!profile?.id || !server?.id) {
+        setCanWrite(false)
+        setIsCheckingPermissions(false)
+        return
+      }
+
+      setIsCheckingPermissions(true)
+      try {
+        const hasWritePermission = await tokenServerService.canUserWrite(profile.id, server.id)
+        setCanWrite(hasWritePermission)
+      } catch (error) {
+        console.error("Error checking write permissions:", error)
+        setCanWrite(false)
+      } finally {
+        setIsCheckingPermissions(false)
+      }
+    }
+
+    checkWritePermissions()
+  }, [profile?.id, server?.id])
+
   useEffect(() => {
     loadPosts()
-  }, [channel.id, server.id, sortBy, profile?.id]) // 🔥 DEPEND ON SERVER TOO
-
-  // Subscribe to real-time updates
-  useEffect(() => {
-    if (!channel.id || !server.id) return
-
-    console.log(`🔌 Setting up feed subscription for server: ${server.id}, channel: ${channel.id}`)
-
-    const subscription = feedService.subscribeToPostUpdates(
-      channel.id,
-      server.id, // 🔥 PASS SERVER ID
-      (newPost: FeedPost) => {
-        console.log(`📰 New post received for server ${server.id}:`, newPost.id)
-
-        // Remove any optimistic post with temp ID and add real post
-        setPosts((prev) => {
-          // Remove optimistic posts (temp IDs start with "temp-")
-          const withoutOptimistic = prev.filter((p) => !p.id.startsWith("temp-"))
-
-          // Check if real post already exists
-          const exists = withoutOptimistic.some((p) => p.id === newPost.id)
-          if (exists) {
-            return prev // Don't add duplicate
-          }
-
-          return [newPost, ...withoutOptimistic]
-        })
-      },
-      profile?.id,
-    )
-
-    const reactionSubscription = feedService.subscribeToReactionUpdates((data: any) => {
-      setPosts((prev) =>
-        prev.map((post) => {
-          if (post.id === data.postId) {
-            const updatedPost = {
-              ...post,
-              likes_count: data.likesCount,
-              retweets_count: data.retweetsCount,
-            }
-            // Update selected post if it's the same post
-            if (selectedPost && selectedPost.id === post.id) {
-              setSelectedPost(updatedPost)
-            }
-            return updatedPost
-          }
-          return post
-        }),
-      )
-    })
-
-    // Subscribe to comment updates to update reply counts
-    const commentSubscription = feedService.subscribeToCommentUpdates("*", (comment: any) => {
-      setPosts((prev) =>
-        prev.map((post) => {
-          if (post.id === comment.post_id) {
-            const updatedPost = {
-              ...post,
-              replies_count: post.replies_count + 1,
-            }
-            // Update selected post if it's the same post
-            if (selectedPost && selectedPost.id === post.id) {
-              setSelectedPost(updatedPost)
-            }
-            return updatedPost
-          }
-          return post
-        }),
-      )
-    })
-
-    return () => {
-      subscription.unsubscribe()
-      reactionSubscription.unsubscribe()
-      commentSubscription.unsubscribe()
-    }
-  }, [channel.id, server.id, profile?.id, selectedPost]) // 🔥 DEPEND ON SERVER TOO
+  }, [channel.id, server.id, sortBy, profile?.id])
 
   const loadPosts = async () => {
     setIsLoading(true)
     try {
       console.log(`📰 Loading posts for server: ${server.id}, channel: ${channel.id}`)
-      const feedPosts = await feedService.getPosts(channel.id, server.id, sortBy, profile?.id) // 🔥 PASS SERVER ID
+      const feedPosts = await feedService.getPosts(channel.id, server.id, sortBy, profile?.id)
       setPosts(feedPosts)
       console.log(`✅ Loaded ${feedPosts.length} posts for server ${server.id}`)
     } catch (error) {
@@ -127,10 +76,12 @@ export function Feed({ server, channel }: FeedProps) {
   }
 
   const handleFileUpload = () => {
+    if (!canWrite) return
     fileInputRef.current?.click()
   }
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canWrite) return
     const files = Array.from(e.target.files || [])
     setAttachedFiles((prev) => [...prev, ...files])
   }
@@ -141,13 +92,12 @@ export function Feed({ server, channel }: FeedProps) {
 
   const handlePost = async () => {
     if (!newPost.trim() && attachedFiles.length === 0) return
-    if (!profile) return
+    if (!profile || !canWrite) return
 
     setIsPosting(true)
     try {
       console.log(`📝 Creating post for server: ${server.id}, channel: ${channel.id}`)
 
-      // Create optimistic post and add to UI immediately
       const optimisticPost: FeedPost = {
         id: `temp-${Date.now()}`,
         channel_id: channel.id,
@@ -179,7 +129,6 @@ export function Feed({ server, channel }: FeedProps) {
         },
       }
 
-      // Add optimistic post to UI immediately
       setPosts((prev) => [optimisticPost, ...prev])
 
       const post = await feedService.createPost({
@@ -208,7 +157,6 @@ export function Feed({ server, channel }: FeedProps) {
     const currentPost = posts.find((p) => p.id === postId)
     if (!currentPost) return
 
-    // Optimistic update for posts list
     setPosts((prev) =>
       prev.map((post) =>
         post.id === postId
@@ -221,7 +169,6 @@ export function Feed({ server, channel }: FeedProps) {
       ),
     )
 
-    // Optimistic update for selected post if it's the same
     if (selectedPost && selectedPost.id === postId) {
       setSelectedPost({
         ...selectedPost,
@@ -232,7 +179,6 @@ export function Feed({ server, channel }: FeedProps) {
 
     const result = await feedService.toggleLike(postId, profile.id)
     if (!result.success) {
-      // Revert optimistic updates on failure
       setPosts((prev) =>
         prev.map((post) =>
           post.id === postId
@@ -260,7 +206,6 @@ export function Feed({ server, channel }: FeedProps) {
     const currentPost = posts.find((p) => p.id === postId)
     if (!currentPost) return
 
-    // Optimistic update for posts list
     setPosts((prev) =>
       prev.map((post) =>
         post.id === postId
@@ -273,7 +218,6 @@ export function Feed({ server, channel }: FeedProps) {
       ),
     )
 
-    // Optimistic update for selected post if it's the same
     if (selectedPost && selectedPost.id === postId) {
       setSelectedPost({
         ...selectedPost,
@@ -284,7 +228,6 @@ export function Feed({ server, channel }: FeedProps) {
 
     const result = await feedService.toggleRetweet(postId, profile.id)
     if (!result.success) {
-      // Revert optimistic updates on failure
       setPosts((prev) =>
         prev.map((post) =>
           post.id === postId
@@ -307,7 +250,6 @@ export function Feed({ server, channel }: FeedProps) {
   }
 
   const handlePostClick = (post: FeedPost, e: React.MouseEvent) => {
-    // Don't open modal if clicking on interactive elements
     const target = e.target as HTMLElement
     if (
       target.closest("button") ||
@@ -324,7 +266,6 @@ export function Feed({ server, channel }: FeedProps) {
 
   const handleProfileClick = (postProfile: any, e: React.MouseEvent) => {
     e.stopPropagation()
-    // Convert post profile to the format expected by ProfileView
     const profileData = {
       id: postProfile.id || postProfile.user_id,
       name: postProfile.display_name || postProfile.username || "Unknown User",
@@ -348,7 +289,6 @@ export function Feed({ server, channel }: FeedProps) {
     return `${Math.floor(diffInMinutes / 1440)}d`
   }
 
-  // Helper function to get attachment properties with fallback for both formats
   const getAttachmentProps = (attachment: any) => {
     return {
       url: attachment.url,
@@ -360,7 +300,6 @@ export function Feed({ server, channel }: FeedProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle shortcuts when not in an input field and no modal is open
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -370,19 +309,16 @@ export function Feed({ server, channel }: FeedProps) {
         return
       }
 
-      // R to refresh/switch to latest
       if (e.key === "r" || e.key === "R") {
         setSortBy("latest")
         return
       }
 
-      // T for top posts
       if (e.key === "t" || e.key === "T") {
         setSortBy("top")
         return
       }
 
-      // N for new post (focus textarea)
       if (e.key === "n" || e.key === "N") {
         if (!isAnnouncementsChannel) {
           const textarea = document.querySelector('textarea[placeholder*="What\'s happening"]') as HTMLTextAreaElement
@@ -400,7 +336,6 @@ export function Feed({ server, channel }: FeedProps) {
 
   return (
     <div className="flex-1 flex flex-col bg-neutral-950">
-      {/* Header */}
       <div className="h-12 px-4 flex items-center justify-between border-b border-neutral-800 bg-neutral-925">
         <div className="flex items-center">
           <TrendingUp className="w-5 h-5 text-neutral-500 mr-2" />
@@ -409,7 +344,6 @@ export function Feed({ server, channel }: FeedProps) {
           <span className="text-xs text-neutral-500">{channel.description}</span>
         </div>
 
-        {/* Sort Toggle - only show for regular feed */}
         {!isAnnouncementsChannel && (
           <div className="flex items-center space-x-2">
             <Button
@@ -442,8 +376,7 @@ export function Feed({ server, channel }: FeedProps) {
         )}
       </div>
 
-      {/* New Post - only show for regular feed */}
-      {!isAnnouncementsChannel && profile && (
+      {!isAnnouncementsChannel && profile && canWrite && !isCheckingPermissions && (
         <div className="p-4 border-b border-neutral-800 bg-neutral-925">
           <div className="flex space-x-3">
             <div className="w-10 h-10 bg-neutral-700 flex items-center justify-center flex-shrink-0">
@@ -472,7 +405,6 @@ export function Feed({ server, channel }: FeedProps) {
                 rows={3}
               />
 
-              {/* File Attachments */}
               {attachedFiles.length > 0 && (
                 <div className="space-y-2">
                   {attachedFiles.map((file, index) => (
@@ -516,7 +448,6 @@ export function Feed({ server, channel }: FeedProps) {
             </div>
           </div>
 
-          {/* Hidden File Input */}
           <input
             ref={fileInputRef}
             type="file"
@@ -528,7 +459,41 @@ export function Feed({ server, channel }: FeedProps) {
         </div>
       )}
 
-      {/* Feed Posts */}
+      {!isAnnouncementsChannel && profile && !canWrite && !isCheckingPermissions && (
+        <div className="p-4 border-b border-neutral-800 bg-neutral-925">
+          <div className="flex space-x-3">
+            <div className="w-10 h-10 bg-neutral-700 flex items-center justify-center flex-shrink-0 opacity-50">
+              {profile.pfp_url ? (
+                <img
+                  src={profile.pfp_url || "/placeholder.svg"}
+                  alt={profile.name}
+                  className="w-10 h-10 object-cover"
+                />
+              ) : (
+                <span className="text-sm font-bold text-neutral-300">{profile.name.charAt(0)}</span>
+              )}
+            </div>
+            <div className="flex-1 space-y-3">
+              <div className="bg-neutral-950 border-neutral-800 border rounded-none p-3 opacity-60">
+                <p className="text-neutral-600 text-sm">You need 10,000 tokens to post</p>
+              </div>
+              <div className="flex items-center justify-between opacity-50">
+                <button
+                  disabled
+                  className="p-2 text-neutral-700 cursor-not-allowed"
+                  title="You need 10,000 tokens to attach files"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
+                <Button disabled size="sm" className="bg-neutral-800 text-neutral-600 cursor-not-allowed rounded-none">
+                  Post
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         {isLoading ? (
           <div className="flex-1 flex items-center justify-center">
@@ -587,7 +552,6 @@ export function Feed({ server, channel }: FeedProps) {
                     <p className="text-neutral-200 mb-3 leading-relaxed whitespace-pre-wrap">{post.content}</p>
                   )}
 
-                  {/* Attachments - Handle both old and new formats */}
                   {post.attachments && post.attachments.length > 0 && (
                     <div className="mb-3 space-y-2">
                       {post.attachments.map((attachment: any, index: number) => {
@@ -616,7 +580,6 @@ export function Feed({ server, channel }: FeedProps) {
                     </div>
                   )}
 
-                  {/* Actions */}
                   <div className="flex items-center space-x-6">
                     <button className="flex items-center space-x-2 text-neutral-500 hover:text-blue-400 transition-colors">
                       <MessageCircle className="w-4 h-4" />
@@ -657,7 +620,6 @@ export function Feed({ server, channel }: FeedProps) {
         )}
       </div>
 
-      {/* Post Modal */}
       {selectedPost && (
         <PostModal
           post={selectedPost}
@@ -668,7 +630,6 @@ export function Feed({ server, channel }: FeedProps) {
         />
       )}
 
-      {/* Profile Modal */}
       {selectedProfile && <ProfileView user={selectedProfile} onClose={() => setSelectedProfile(null)} />}
     </div>
   )

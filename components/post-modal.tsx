@@ -3,13 +3,14 @@
 import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
-import { X, Heart, MessageCircle, Repeat2, Share, Paperclip } from "lucide-react"
+import { X, Heart, MessageCircle, Repeat2, Share, Paperclip, Lock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { FeedPost, FeedComment } from "@/lib/services/feed"
 import { feedService } from "@/lib/services/feed"
 import { useProfile } from "@/contexts/profile-context"
 import { ProfileView } from "@/components/profile-view"
+import { tokenServerService } from "@/lib/services/token-servers"
 
 interface PostModalProps {
   post: FeedPost
@@ -27,19 +28,18 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
   const [isPostingComment, setIsPostingComment] = useState(false)
   const [currentPost, setCurrentPost] = useState<FeedPost>(post)
   const [selectedProfile, setSelectedProfile] = useState<any>(null)
+  const [canWrite, setCanWrite] = useState(true)
+  const [isCheckingPermissions, setIsCheckingPermissions] = useState(true)
   const commentInputRef = useRef<HTMLInputElement>(null)
 
-  // Update current post when prop changes
   useEffect(() => {
     setCurrentPost(post)
   }, [post])
 
-  // Load comments when modal opens
   useEffect(() => {
     loadComments()
   }, [post.id])
 
-  // Focus comment input when modal opens
   useEffect(() => {
     const timer = setTimeout(() => {
       commentInputRef.current?.focus()
@@ -47,7 +47,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
     return () => clearTimeout(timer)
   }, [])
 
-  // Handle ESC key to close modal
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -65,16 +64,13 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
     }
   }, [onClose, selectedProfile])
 
-  // Subscribe to new comments
   useEffect(() => {
     const subscription = feedService.subscribeToCommentUpdates(post.id, (newComment: FeedComment) => {
-      // Only add the comment if it doesn't already exist (to prevent duplicates)
       setComments((prev) => {
         const exists = prev.some((comment) => comment.id === newComment.id)
         if (exists) {
           return prev
         }
-        // Add new comment at the beginning (most recent first)
         return [newComment, ...prev]
       })
     })
@@ -84,11 +80,33 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
     }
   }, [post.id])
 
+  useEffect(() => {
+    const checkWritePermissions = async () => {
+      if (!profile?.id || !post?.server_id) {
+        setCanWrite(false)
+        setIsCheckingPermissions(false)
+        return
+      }
+
+      setIsCheckingPermissions(true)
+      try {
+        const hasWritePermission = await tokenServerService.canUserWrite(profile.id, post.server_id)
+        setCanWrite(hasWritePermission)
+      } catch (error) {
+        console.error("Error checking write permissions:", error)
+        setCanWrite(false)
+      } finally {
+        setIsCheckingPermissions(false)
+      }
+    }
+
+    checkWritePermissions()
+  }, [profile?.id, post?.server_id])
+
   const loadComments = async () => {
     setIsLoadingComments(true)
     try {
       const postComments = await feedService.getComments(post.id)
-      // Sort comments by created_at descending (most recent first)
       const sortedComments = postComments.sort(
         (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
       )
@@ -102,11 +120,10 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
 
   const handleComment = async () => {
     const content = newComment.trim()
-    if (!content || !profile || isPostingComment) return
+    if (!content || !profile || isPostingComment || !canWrite) return
 
     setIsPostingComment(true)
 
-    // Immediately update the replies count (client-side optimistic update)
     setCurrentPost((prev) => ({
       ...prev,
       replies_count: prev.replies_count + 1,
@@ -123,7 +140,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
       }
     } catch (error) {
       console.error("Error creating comment:", error)
-      // Revert the optimistic update on error
       setCurrentPost((prev) => ({
         ...prev,
         replies_count: prev.replies_count - 1,
@@ -135,7 +151,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
 
   const handleProfileClickInternal = (profileData: any, e: React.MouseEvent) => {
     e.stopPropagation()
-    // Convert profile data to the format expected by ProfileView
     const formattedProfile = {
       id: profileData.id || profileData.user_id,
       name: profileData.display_name || profileData.username || "Unknown User",
@@ -159,7 +174,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
     return `${Math.floor(diffInMinutes / 1440)}d`
   }
 
-  // Helper function to get attachment properties with fallback for both formats
   const getAttachmentProps = (attachment: any) => {
     return {
       url: attachment.url,
@@ -172,7 +186,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-neutral-900 border border-neutral-700 w-full max-w-2xl max-h-[90vh] rounded-none flex flex-col">
-        {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-neutral-800">
           <h2 className="text-lg font-semibold text-neutral-100">Post</h2>
           <button
@@ -183,9 +196,7 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
           </button>
         </div>
 
-        {/* Content - Fixed scrollbar styling */}
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-track-transparent scrollbar-thumb-neutral-700">
-          {/* Original Post */}
           <div className="p-6 border-b border-neutral-800">
             <div className="flex space-x-3">
               <div
@@ -223,7 +234,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
                   </p>
                 )}
 
-                {/* Attachments */}
                 {currentPost.attachments && currentPost.attachments.length > 0 && (
                   <div className="mb-4 space-y-2">
                     {currentPost.attachments.map((attachment: any, index: number) => {
@@ -249,7 +259,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
                   </div>
                 )}
 
-                {/* Action Buttons with Counts - Twitter Style Layout */}
                 <div className="flex items-center justify-between py-4 border-b border-neutral-800 max-w-md">
                   <button className="flex items-center space-x-2 text-neutral-500 hover:text-blue-400 transition-colors">
                     <MessageCircle className="w-5 h-5" />
@@ -279,12 +288,17 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
                 </div>
               </div>
             </div>
-          </div>
 
-          {/* Comments Section */}
-          <div className="flex-1">
-            {/* New Comment Input */}
-            {profile && (
+            {!canWrite && !isCheckingPermissions && (
+              <div className="px-4 py-3 bg-amber-900/20 border-b border-amber-800 flex items-center space-x-2">
+                <Lock className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                <p className="text-sm text-amber-300">
+                  You need at least 10,000 tokens to reply to posts. You can read but not write.
+                </p>
+              </div>
+            )}
+
+            {profile && canWrite && !isCheckingPermissions && (
               <div className="p-4 border-b border-neutral-800">
                 <div className="flex space-x-3">
                   <div className="w-10 h-10 bg-neutral-700 flex items-center justify-center flex-shrink-0">
@@ -328,7 +342,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
               </div>
             )}
 
-            {/* Comments List */}
             <div>
               {isLoadingComments ? (
                 <div className="p-8 text-center text-neutral-500">Loading comments...</div>
@@ -380,7 +393,6 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
           </div>
         </div>
 
-        {/* Profile Modal */}
         {selectedProfile && <ProfileView user={selectedProfile} onClose={() => setSelectedProfile(null)} />}
       </div>
     </div>

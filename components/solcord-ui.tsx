@@ -21,23 +21,12 @@ import { useProfile } from "@/contexts/profile-context"
 function SolcordUIInner() {
   const [activeServer, setActiveServer] = useState<Server>(servers[0])
   const [dynamicChannelsByServer, setDynamicChannelsByServer] = useState<Record<string, ChannelSection[]>>({})
-
-  // Safe initialization of activeChannel
-  const getInitialChannel = (serverId: string) => {
-    const serverChannels = dynamicChannelsByServer[serverId]
-    if (serverChannels && serverChannels.length > 0 && serverChannels[0].channels.length > 0) {
-      return serverChannels[0].channels[0]
-    }
-    // Fallback to a default channel structure
-    return {
-      id: "general",
-      name: "general",
-      type: "text" as const,
-      description: "General discussion",
-    }
-  }
-
-  const [activeChannel, setActiveChannel] = useState<Channel>(getInitialChannel(servers[0].id))
+  const [activeChannel, setActiveChannel] = useState<Channel>({
+    id: "general",
+    name: "general",
+    type: "text" as const,
+    description: "General discussion",
+  })
   const [channelSidebarCollapsed, setChannelSidebarCollapsed] = useState(false)
   const [userListCollapsed, setUserListCollapsed] = useState(false)
   const [showDMs, setShowDMs] = useState(false)
@@ -84,6 +73,7 @@ function SolcordUIInner() {
         name: tokenServer.name,
         logo: tokenServer.logo_url,
         icon: tokenServer.logo_url,
+        token_ca: tokenServer.token_ca,
       }))
 
       // Combine default servers with user's token servers
@@ -99,10 +89,32 @@ function SolcordUIInner() {
     }
   }, [profile?.id, loadServerChannels])
 
-  // Load user servers and channels on profile load
+  // Refresh user balances
+  const refreshUserBalances = useCallback(async () => {
+    if (!profile?.id || !profile.primary_wallet) return
+
+    try {
+      console.log("[v0] Refreshing user token balances...")
+      await tokenServerService.updateUserMemberships(profile.id, profile.primary_wallet)
+      console.log("[v0] Token balances refreshed successfully")
+
+      // Reload servers to reflect updated balances/roles
+      await loadUserServers()
+    } catch (error) {
+      console.error("[v0] Error refreshing token balances:", error)
+    }
+  }, [profile?.id, profile?.primary_wallet, loadUserServers])
+
   useEffect(() => {
-    loadUserServers()
-  }, [loadUserServers])
+    const initializeUserData = async () => {
+      if (!profile?.id) return
+
+      // First refresh token balances, then load servers
+      await refreshUserBalances()
+    }
+
+    initializeUserData()
+  }, [profile?.id, refreshUserBalances])
 
   // Update active channel when server changes
   useEffect(() => {
@@ -328,6 +340,7 @@ function SolcordUIInner() {
         onOpenDMs={handleOpenDMs}
         onAddServer={handleOpenServerSearch}
         unreadDMCount={unreadDMCount}
+        onServersUpdate={loadUserServers}
       />
       <ChannelSidebar
         server={activeServer}
@@ -358,7 +371,12 @@ function SolcordUIInner() {
       {showSettings && <Settings onClose={() => setShowSettings(false)} />}
       {showServerSearch && <ServerSearchModal onClose={handleCloseServerSearch} />}
       {showProfileView && (
-        <ProfileView user={selectedUser} onClose={handleCloseProfileView} onOpenSettings={handleOpenSettings} />
+        <ProfileView
+          user={selectedUser}
+          onClose={handleCloseProfileView}
+          onOpenSettings={handleOpenSettings}
+          activeServer={activeServer}
+        />
       )}
     </div>
   )

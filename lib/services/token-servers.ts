@@ -16,6 +16,7 @@ export interface ServerMembership {
   server_id: string
   role: "member" | "guest"
   token_balance: number
+  holding_percentage: number
   last_verified_at: string
 }
 
@@ -27,6 +28,14 @@ export interface ServerWithMembership extends Server {
 
 export class TokenServerService {
   private supabase = createClient()
+
+  private calculateHoldingPercentage(tokenBalanceRaw: number, decimals: number): number {
+    // Convert raw balance back to actual tokens by dividing by 10^decimals
+    const actualTokens = tokenBalanceRaw / Math.pow(10, decimals)
+    // 10 million tokens = 1% (as specified by user)
+    const percentage = (actualTokens / 10_000_000) * 1.0
+    return Math.round(percentage * 1000000) / 1000000 // Round to 6 decimal places
+  }
 
   async getServerByTokenCA(tokenCA: string): Promise<ServerWithMembership | null> {
     try {
@@ -152,7 +161,6 @@ export class TokenServerService {
 
       if (existingMembership) {
         console.log("Updating existing membership...")
-        // Update existing membership
         const { error: updateError } = await this.supabase
           .from("server_memberships")
           .update({
@@ -168,7 +176,6 @@ export class TokenServerService {
         }
       } else {
         console.log("Creating new membership...")
-        // Create new membership
         const { error: membershipError } = await this.supabase.from("server_memberships").insert({
           user_id: userId,
           server_id: server.id,
@@ -242,8 +249,7 @@ export class TokenServerService {
         // Convert token balance to integer
         const tokenBalanceInt = Math.floor(userBalance * Math.pow(10, tokenData.token.decimals))
 
-        // Update membership if role changed
-        if (server.membership && server.membership.role !== newRole) {
+        if (server.membership) {
           await this.supabase
             .from("server_memberships")
             .update({
@@ -276,6 +282,88 @@ export class TokenServerService {
       }
     } catch (error) {
       console.error("Error in auto-discover servers:", error)
+    }
+  }
+
+  async getUserHoldingPercentage(userId: string, serverId: string): Promise<number> {
+    try {
+      // Get the membership with token_balance
+      const { data: membership, error: membershipError } = await this.supabase
+        .from("server_memberships")
+        .select("token_balance")
+        .eq("user_id", userId)
+        .eq("server_id", serverId)
+        .maybeSingle()
+
+      if (membershipError || !membership) {
+        console.error("Error fetching user membership:", membershipError)
+        return 0
+      }
+
+      const decimals = 6 // Standard for most Solana tokens
+      const tokenBalanceRaw = membership.token_balance || 0
+
+      // Calculate percentage from raw balance
+      return this.calculateHoldingPercentage(tokenBalanceRaw, decimals)
+    } catch (error) {
+      console.error("Error in getUserHoldingPercentage:", error)
+      return 0
+    }
+  }
+
+  async canUserWrite(userId: string, serverId: string): Promise<boolean> {
+    try {
+      if (serverId === "solcord") {
+        return true
+      }
+
+      const { data: membership, error } = await this.supabase
+        .from("server_memberships")
+        .select("token_balance")
+        .eq("user_id", userId)
+        .eq("server_id", serverId)
+        .maybeSingle()
+
+      if (error || !membership) {
+        return false
+      }
+
+      const decimals = 6 // Standard for most Solana tokens
+      const tokenBalanceRaw = membership.token_balance || 0
+      const actualTokens = tokenBalanceRaw / Math.pow(10, decimals)
+
+      // User needs 10k tokens to write
+      return actualTokens >= 10000
+    } catch (error) {
+      console.error("Error checking user write permissions:", error)
+      return false
+    }
+  }
+
+  async leaveServer(userId: string, serverId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Prevent leaving the main Solcord server
+      if (serverId === "solcord") {
+        return { success: false, error: "Cannot leave the main Solcord server" }
+      }
+
+      // Delete the user's membership from the server
+      const { error } = await this.supabase
+        .from("server_memberships")
+        .delete()
+        .eq("user_id", userId)
+        .eq("server_id", serverId)
+
+      if (error) {
+        console.error("Error leaving server:", error)
+        return { success: false, error: "Failed to leave server" }
+      }
+
+      console.log(`User ${userId} successfully left server ${serverId}`)
+      return { success: true }
+    } catch (error) {
+      console.error("Error in leaveServer:", error)
+      return { success: false, error: "Unexpected error occurred" }
     }
   }
 }
