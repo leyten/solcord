@@ -287,6 +287,8 @@ export class TokenServerService {
 
   async getUserHoldingPercentage(userId: string, serverId: string): Promise<number> {
     try {
+      console.log("[v0] getUserHoldingPercentage called:", { userId, serverId })
+
       // Get the membership with token_balance
       const { data: membership, error: membershipError } = await this.supabase
         .from("server_memberships")
@@ -294,6 +296,8 @@ export class TokenServerService {
         .eq("user_id", userId)
         .eq("server_id", serverId)
         .maybeSingle()
+
+      console.log("[v0] getUserHoldingPercentage membership query:", { membership, membershipError })
 
       if (membershipError || !membership) {
         console.error("Error fetching user membership:", membershipError)
@@ -303,8 +307,13 @@ export class TokenServerService {
       const decimals = 6 // Standard for most Solana tokens
       const tokenBalanceRaw = membership.token_balance || 0
 
+      console.log("[v0] getUserHoldingPercentage calculation:", { tokenBalanceRaw, decimals })
+
       // Calculate percentage from raw balance
-      return this.calculateHoldingPercentage(tokenBalanceRaw, decimals)
+      const percentage = this.calculateHoldingPercentage(tokenBalanceRaw, decimals)
+      console.log("[v0] getUserHoldingPercentage result:", { percentage })
+
+      return percentage
     } catch (error) {
       console.error("Error in getUserHoldingPercentage:", error)
       return 0
@@ -364,6 +373,57 @@ export class TokenServerService {
     } catch (error) {
       console.error("Error in leaveServer:", error)
       return { success: false, error: "Unexpected error occurred" }
+    }
+  }
+
+  async getUserTokenPercentage(serverId: string): Promise<number> {
+    try {
+      console.log("[v0] getUserTokenPercentage called:", { serverId })
+
+      if (!this.supabase.auth.getUser) {
+        console.log("[v0] getUserTokenPercentage: No auth user function")
+        return 0
+      }
+
+      const {
+        data: { user },
+      } = await this.supabase.auth.getUser()
+
+      console.log("[v0] getUserTokenPercentage auth user:", { user: user ? { id: user.id } : null })
+
+      if (!user) {
+        console.log("[v0] getUserTokenPercentage: No authenticated user")
+        return 0
+      }
+
+      const { data: membership, error } = await this.supabase
+        .from("server_memberships")
+        .select("token_balance")
+        .eq("user_id", user.id)
+        .eq("server_id", serverId)
+        .maybeSingle()
+
+      console.log("[v0] getUserTokenPercentage membership:", { membership, error })
+
+      if (error || !membership) {
+        console.log("[v0] getUserTokenPercentage: No membership found")
+        return 0
+      }
+
+      const tokenBalanceRaw = membership.token_balance || 0
+      const minimumFor1Percent = 10_000_000_000_000 // 10 trillion raw units = 10M tokens = 1%
+
+      console.log("[v0] getUserTokenPercentage balance check:", {
+        tokenBalanceRaw,
+        minimumFor1Percent,
+        hasAccess: tokenBalanceRaw >= minimumFor1Percent,
+      })
+
+      // Return 1.0 if user has 1%+ tokens, 0 otherwise
+      return tokenBalanceRaw >= minimumFor1Percent ? 1.0 : 0
+    } catch (error) {
+      console.error("Error in getUserTokenPercentage:", error)
+      return 0
     }
   }
 }

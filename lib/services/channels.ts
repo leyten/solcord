@@ -10,6 +10,7 @@ export interface DatabaseChannel {
   position: number
   created_at: string
   updated_at: string
+  min_token_percentage: number | null
 }
 
 class ChannelsService {
@@ -71,6 +72,7 @@ class ChannelsService {
           name: ch.name,
           type: ch.type,
           description: ch.description || "No description",
+          minTokenPercentage: ch.min_token_percentage || undefined,
         })),
       })
     }
@@ -83,6 +85,7 @@ class ChannelsService {
           name: ch.name,
           type: ch.type,
           description: ch.description || "No description",
+          minTokenPercentage: ch.min_token_percentage || undefined,
         })),
       })
     }
@@ -135,10 +138,17 @@ class ChannelsService {
           position: 3,
         },
         {
+          name: "1%+ holders",
+          type: "text",
+          description: "Exclusive chat for 1%+ token holders",
+          position: 4,
+          min_token_percentage: 1.0,
+        },
+        {
           name: "general-voice",
           type: "voice",
           description: "General voice chat",
-          position: 4,
+          position: 5,
         },
       ]
 
@@ -175,6 +185,7 @@ class ChannelsService {
       name: string
       type: "text" | "voice" | "feed"
       description?: string
+      min_token_percentage?: number
     },
   ): Promise<DatabaseChannel | null> {
     try {
@@ -196,6 +207,7 @@ class ChannelsService {
           type: channelData.type,
           description: channelData.description || null,
           position: nextPosition,
+          min_token_percentage: channelData.min_token_percentage || null,
         })
         .select("*")
         .single()

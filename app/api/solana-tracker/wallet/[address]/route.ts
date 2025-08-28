@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server"
 
 export async function GET(request: NextRequest, { params }: { params: { address: string } }) {
   try {
-    const { address } = params
+    const { address } = await params
 
     if (!address) {
       return NextResponse.json({ error: "Wallet address is required" }, { status: 400 })

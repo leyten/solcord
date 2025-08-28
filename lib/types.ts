@@ -11,6 +11,7 @@ export interface Channel {
   type: "text" | "voice" | "trade" | "feed"
   description: string
   requiredRank?: string
+  minTokenPercentage?: number // Added token percentage requirement for VIP channels
 }
 
 export interface ChannelSection {

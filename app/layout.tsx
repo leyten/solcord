@@ -6,7 +6,10 @@ import { PrivyProvider } from "@/components/privy-provider"
 
 export const metadata: Metadata = {
   title: "SolCord",
-  description: "The ultimate token-gated chat platform",
+  description: "A decentralized social platform for memecoin traders",
+  icons: {
+    icon: "/favicon.ico",
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

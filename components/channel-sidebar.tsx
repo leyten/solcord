@@ -1,7 +1,10 @@
 "use client"
-import { Hash, Mic, Repeat, ChevronRight, ChevronLeft, TrendingUp, Megaphone } from "lucide-react"
+import { Hash, Mic, Repeat, ChevronRight, ChevronLeft, TrendingUp, Megaphone, Lock } from "lucide-react"
 import type { Server, Channel, ChannelSection } from "@/lib/types"
 import { UserStatus } from "@/components/user-status"
+import { tokenServerService } from "@/lib/services/token-servers"
+import { useEffect, useState } from "react"
+import { usePrivy } from "@privy-io/react-auth"
 
 interface ChannelSidebarProps {
   server: Server
@@ -29,6 +32,37 @@ export function ChannelSidebar({
   onToggleCollapse,
   onOpenSettings,
 }: ChannelSidebarProps) {
+  const [userTokenPercentage, setUserTokenPercentage] = useState<number>(0)
+  const { user } = usePrivy()
+
+  useEffect(() => {
+    const checkUserTokenPercentage = async () => {
+      if (!user?.id) return
+
+      try {
+        const percentage = await tokenServerService.getUserHoldingPercentage(user.id, server.id)
+        setUserTokenPercentage(percentage)
+      } catch (error) {
+        console.error("Failed to get user token percentage:", error)
+        setUserTokenPercentage(0)
+      }
+    }
+
+    checkUserTokenPercentage()
+  }, [server.id, user?.id])
+
+  const canAccessChannel = (channel: Channel): boolean => {
+    if (!channel.minTokenPercentage) {
+      return true
+    }
+    if (server.id === "solcord") {
+      return true
+    }
+
+    const hasAccess = userTokenPercentage >= channel.minTokenPercentage
+    return hasAccess
+  }
+
   if (collapsed) {
     return (
       <div className="w-12 bg-neutral-925 border-r border-neutral-800 flex flex-col">
@@ -48,17 +82,22 @@ export function ChannelSidebar({
             section.channels.map((channel) => {
               const Icon = channelIcons[channel.type] || Hash
               const isActive = activeChannel.id === channel.id
+              const hasAccess = canAccessChannel(channel)
               return (
                 <button
                   key={channel.id}
-                  onClick={() => setActiveChannel(channel)}
-                  className={`w-full flex items-center justify-center py-2 transition-colors rounded-none ${
+                  onClick={() => hasAccess && setActiveChannel(channel)}
+                  disabled={!hasAccess}
+                  className={`w-full flex items-center justify-center py-2 transition-colors rounded-none relative ${
                     isActive
                       ? "bg-neutral-800 text-neutral-100"
-                      : "text-neutral-400 hover:bg-neutral-850 hover:text-neutral-200"
+                      : hasAccess
+                        ? "text-neutral-400 hover:bg-neutral-850 hover:text-neutral-200"
+                        : "text-neutral-600 opacity-50 cursor-not-allowed"
                   }`}
                 >
                   <Icon className="w-4 h-4" />
+                  {!hasAccess && <Lock className="w-2 h-2 absolute top-1 right-1" />}
                 </button>
               )
             }),
@@ -74,9 +113,7 @@ export function ChannelSidebar({
       <div className="h-12 px-4 flex items-center justify-between border-b border-neutral-800 bg-neutral-900">
         <span className="text-sm font-semibold text-neutral-100 truncate">{server.name}</span>
         <div className="flex items-center space-x-2">
-          <div className="text-xs text-neutral-500 hidden lg:block">
-            
-          </div>
+          <div className="text-xs text-neutral-500 hidden lg:block"></div>
           <button
             onClick={onToggleCollapse}
             className="p-1 text-neutral-500 hover:text-neutral-200 hover:bg-neutral-800 rounded-none transition-colors"
@@ -103,18 +140,30 @@ export function ChannelSidebar({
                 }
 
                 const isActive = activeChannel.id === channel.id
+                const hasAccess = canAccessChannel(channel)
+                const isTokenGated = channel.minTokenPercentage && channel.minTokenPercentage > 0
+
                 return (
                   <button
                     key={channel.id}
-                    onClick={() => setActiveChannel(channel)}
-                    className={`w-full flex items-center px-4 py-1.5 text-sm transition-colors rounded-none ${
+                    onClick={() => hasAccess && setActiveChannel(channel)}
+                    disabled={!hasAccess}
+                    className={`w-full flex items-center px-4 py-1.5 text-sm transition-colors rounded-none relative ${
                       isActive
                         ? "bg-neutral-800 text-neutral-100"
-                        : "text-neutral-400 hover:bg-neutral-850 hover:text-neutral-200"
+                        : hasAccess
+                          ? "text-neutral-400 hover:bg-neutral-850 hover:text-neutral-200"
+                          : "text-neutral-600 opacity-50 cursor-not-allowed bg-neutral-950"
                     }`}
                   >
                     <Icon className="w-4 h-4 mr-2 flex-shrink-0" />
                     <span className="truncate">{channel.name}</span>
+                    {isTokenGated && (
+                      <div className="ml-auto flex items-center space-x-1">
+                        {!hasAccess && <Lock className="w-3 h-3" />}
+                        <span className="text-xs text-neutral-500">{channel.minTokenPercentage}%+</span>
+                      </div>
+                    )}
                   </button>
                 )
               })}
