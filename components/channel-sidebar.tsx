@@ -1,5 +1,7 @@
 "use client"
 import { Hash, Mic, Repeat, ChevronRight, ChevronLeft, TrendingUp, Megaphone, Lock } from "lucide-react"
+import type React from "react"
+
 import type { Server, Channel, ChannelSection } from "@/lib/types"
 import { UserStatus } from "@/components/user-status"
 import { tokenServerService } from "@/lib/services/token-servers"
@@ -21,6 +23,24 @@ const channelIcons: { [key: string]: any } = {
   voice: Mic,
   feed: TrendingUp,
   trade: Repeat,
+}
+
+const Tooltip = ({ children, text }: { children: React.ReactNode; text: string }) => {
+  const [isVisible, setIsVisible] = useState(false)
+
+  if (!text) return <>{children}</>
+
+  return (
+    <div className="relative w-full" onMouseEnter={() => setIsVisible(true)} onMouseLeave={() => setIsVisible(false)}>
+      {children}
+      {isVisible && (
+        <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 z-50 px-3 py-2 bg-neutral-800 border border-neutral-600 text-sm text-neutral-100 whitespace-nowrap shadow-lg">
+          {text}
+          <div className="absolute right-full top-1/2 -translate-y-1/2 border-4 border-transparent border-r-neutral-800"></div>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function ChannelSidebar({
@@ -52,6 +72,10 @@ export function ChannelSidebar({
   }, [server.id, user?.id])
 
   const canAccessChannel = (channel: Channel): boolean => {
+    if (channel.type === "voice") {
+      return false
+    }
+
     if (!channel.minTokenPercentage) {
       return true
     }
@@ -61,6 +85,16 @@ export function ChannelSidebar({
 
     const hasAccess = userTokenPercentage >= channel.minTokenPercentage
     return hasAccess
+  }
+
+  const getChannelTooltip = (channel: Channel): string => {
+    if (channel.type === "voice") {
+      return "Coming Soon"
+    }
+    if (channel.minTokenPercentage && userTokenPercentage < channel.minTokenPercentage) {
+      return `Requires ${channel.minTokenPercentage}% tokens`
+    }
+    return ""
   }
 
   if (collapsed) {
@@ -83,22 +117,24 @@ export function ChannelSidebar({
               const Icon = channelIcons[channel.type] || Hash
               const isActive = activeChannel.id === channel.id
               const hasAccess = canAccessChannel(channel)
+              const tooltip = getChannelTooltip(channel)
               return (
-                <button
-                  key={channel.id}
-                  onClick={() => hasAccess && setActiveChannel(channel)}
-                  disabled={!hasAccess}
-                  className={`w-full flex items-center justify-center py-2 transition-colors rounded-none relative ${
-                    isActive
-                      ? "bg-neutral-800 text-neutral-100"
-                      : hasAccess
-                        ? "text-neutral-400 hover:bg-neutral-850 hover:text-neutral-200"
-                        : "text-neutral-600 opacity-50 cursor-not-allowed"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  {!hasAccess && <Lock className="w-2 h-2 absolute top-1 right-1" />}
-                </button>
+                <Tooltip key={channel.id} text={tooltip}>
+                  <button
+                    onClick={() => hasAccess && setActiveChannel(channel)}
+                    disabled={!hasAccess}
+                    className={`w-full flex items-center justify-center py-2 transition-colors rounded-none relative ${
+                      isActive
+                        ? "bg-neutral-800 text-neutral-100"
+                        : hasAccess
+                          ? "text-neutral-400 hover:bg-neutral-850 hover:text-neutral-200"
+                          : "text-neutral-600 opacity-50 cursor-not-allowed"
+                    }`}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {!hasAccess && <Lock className="w-2 h-2 absolute top-1 right-1" />}
+                  </button>
+                </Tooltip>
               )
             }),
           )}
@@ -142,29 +178,32 @@ export function ChannelSidebar({
                 const isActive = activeChannel.id === channel.id
                 const hasAccess = canAccessChannel(channel)
                 const isTokenGated = channel.minTokenPercentage && channel.minTokenPercentage > 0
+                const tooltip = getChannelTooltip(channel)
 
                 return (
-                  <button
-                    key={channel.id}
-                    onClick={() => hasAccess && setActiveChannel(channel)}
-                    disabled={!hasAccess}
-                    className={`w-full flex items-center px-4 py-1.5 text-sm transition-colors rounded-none relative ${
-                      isActive
-                        ? "bg-neutral-800 text-neutral-100"
-                        : hasAccess
-                          ? "text-neutral-400 hover:bg-neutral-850 hover:text-neutral-200"
-                          : "text-neutral-600 opacity-50 cursor-not-allowed bg-neutral-950"
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 mr-2 flex-shrink-0" />
-                    <span className="truncate">{channel.name}</span>
-                    {isTokenGated && (
-                      <div className="ml-auto flex items-center space-x-1">
-                        {!hasAccess && <Lock className="w-3 h-3" />}
-                        <span className="text-xs text-neutral-500">{channel.minTokenPercentage}%+</span>
-                      </div>
-                    )}
-                  </button>
+                  <Tooltip key={channel.id} text={tooltip}>
+                    <button
+                      onClick={() => hasAccess && setActiveChannel(channel)}
+                      disabled={!hasAccess}
+                      className={`w-full flex items-center px-4 py-1.5 text-sm transition-colors rounded-none relative ${
+                        isActive
+                          ? "bg-neutral-800 text-neutral-100"
+                          : hasAccess
+                            ? "text-neutral-400 hover:bg-neutral-850 hover:text-neutral-200"
+                            : "text-neutral-600 opacity-50 cursor-not-allowed bg-neutral-950"
+                      }`}
+                    >
+                      <Icon className="w-4 h-4 mr-2 flex-shrink-0" />
+                      <span className="truncate">{channel.name}</span>
+                      {isTokenGated && (
+                        <div className="ml-auto flex items-center space-x-1">
+                          {!hasAccess && <Lock className="w-3 h-3" />}
+                          <span className="text-xs text-neutral-500">{channel.minTokenPercentage}%+</span>
+                        </div>
+                      )}
+                      {channel.type === "voice" && <Lock className="w-3 h-3 ml-auto" />}
+                    </button>
+                  </Tooltip>
                 )
               })}
             </div>
