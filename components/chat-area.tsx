@@ -37,35 +37,48 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
   const [showProfileView, setShowProfileView] = useState(false)
   const [canWrite, setCanWrite] = useState(true)
   const [isCheckingPermissions, setIsCheckingPermissions] = useState(true)
+  const [canAccessChannel, setCanAccessChannel] = useState(true)
+  const [userTokenPercentage, setUserTokenPercentage] = useState<number>(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const { profile } = useProfile()
 
-  useEffect(() => {
-    const checkWritePermissions = async () => {
-      if (!profile?.id || !server?.id) {
-        setCanWrite(false)
-        setIsCheckingPermissions(false)
-        return
-      }
-
-      setIsCheckingPermissions(true)
-      try {
-        const hasWritePermission = await tokenServerService.canUserWrite(profile.id, server.id)
-        setCanWrite(hasWritePermission)
-      } catch (error) {
-        console.error("Error checking write permissions:", error)
-        setCanWrite(false)
-      } finally {
-        setIsCheckingPermissions(false)
-      }
+  const checkPermissions = async () => {
+    if (!profile?.id || !server?.id) {
+      setCanWrite(false)
+      setCanAccessChannel(false)
+      setIsCheckingPermissions(false)
+      return
     }
 
-    checkWritePermissions()
-  }, [profile?.id, server?.id])
+    setIsCheckingPermissions(true)
+    try {
+      const [hasWritePermission, tokenPercentage] = await Promise.all([
+        tokenServerService.canUserWrite(profile.id, server.id),
+        tokenServerService.getUserTokenPercentage(server.id),
+      ])
+
+      setCanWrite(hasWritePermission)
+      setUserTokenPercentage(tokenPercentage)
+
+      const channelRequirement = channel.minTokenPercentage || 0
+      const hasChannelAccess = server.id === "solcord" || tokenPercentage >= channelRequirement
+      setCanAccessChannel(hasChannelAccess)
+    } catch (error) {
+      console.error("Error checking permissions:", error)
+      setCanWrite(false)
+      setCanAccessChannel(false)
+    } finally {
+      setIsCheckingPermissions(false)
+    }
+  }
 
   useEffect(() => {
-    if (!channel?.id || !server?.id) return
+    checkPermissions()
+  }, [profile?.id, server?.id, channel.minTokenPercentage])
+
+  useEffect(() => {
+    if (!channel?.id || !server?.id || !canAccessChannel) return
 
     console.log(`🔄 Loading messages for server: ${server.id}, channel: ${channel.id}`)
 
@@ -128,7 +141,7 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
       console.log(`🧹 Cleaning up subscription for: ${server.id}/${channel.id}`)
       messagesService.unsubscribeFromChannel(channel.id, server.id)
     }
-  }, [channel.id, server.id])
+  }, [channel.id, server.id, canAccessChannel])
 
   const handleScroll = async () => {
     if (!messagesContainerRef.current || !hasMore || isLoadingMore) return
@@ -206,6 +219,28 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
   const handleCloseProfileView = () => {
     setShowProfileView(false)
     setSelectedUser(null)
+  }
+
+  if (!canAccessChannel && !isCheckingPermissions) {
+    return (
+      <div className="flex-1 flex flex-col bg-neutral-950">
+        <div className="h-12 px-4 flex items-center justify-between border-b border-neutral-800 bg-neutral-925">
+          <div className="flex items-center">
+            <Hash className="w-5 h-5 text-neutral-500 mr-2" />
+            <span className="text-sm font-semibold text-neutral-100">{channel.name}</span>
+            <div className="w-px h-4 bg-neutral-700 mx-3" />
+            <span className="text-xs text-neutral-500 truncate">{channel.description}</span>
+          </div>
+        </div>
+
+        <div className="flex-1 flex flex-col items-center justify-center text-center text-neutral-500">
+          <Lock className="w-16 h-16 mb-4 text-neutral-600" />
+          <h3 className="text-lg font-semibold text-neutral-300 mb-2">Channel Restricted</h3>
+          <p className="text-sm mb-1">This channel requires {channel.minTokenPercentage}%+ token holdings</p>
+          <p className="text-xs text-neutral-600">You currently hold {userTokenPercentage.toFixed(3)}%</p>
+        </div>
+      </div>
+    )
   }
 
   if (channel.type === "voice") {
@@ -313,7 +348,7 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
           server={server}
           channel={channel}
           replyingTo={replyingTo}
-          canWrite={canWrite}
+          canWrite={canWrite && canAccessChannel}
           isCheckingPermissions={isCheckingPermissions}
           onMessageSent={(message) => {
             console.log("📤 Message sent callback triggered:", message.content)
@@ -587,6 +622,26 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
 
   return (
     <div className="relative">
+      {attachedFiles.length > 0 && (
+        <div className="mb-2 space-y-2">
+          {attachedFiles.map((file, index) => (
+            <div key={index} className="flex items-center justify-between bg-neutral-800 border border-neutral-700 p-2">
+              <div className="flex items-center space-x-2">
+                <Paperclip className="w-4 h-4 text-neutral-400" />
+                <span className="text-sm text-neutral-300 truncate">{file.name}</span>
+                <span className="text-xs text-neutral-500">({(file.size / 1024).toFixed(1)} KB)</span>
+              </div>
+              <button
+                onClick={() => removeFile(index)}
+                className="p-1 text-neutral-500 hover:text-red-400 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div
         className={`bg-neutral-900 border rounded-none overflow-hidden transition-all ${
           !canWrite && !isCheckingPermissions
