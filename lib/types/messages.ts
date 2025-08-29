@@ -21,13 +21,6 @@ export interface MessageEmbed {
   height?: number
 }
 
-export interface MessageReaction {
-  emoji: string
-  count: number
-  users: string[]
-  reacted: boolean
-}
-
 export interface Message {
   id: string
   channel_id: string
@@ -37,7 +30,6 @@ export interface Message {
   message_type: "text" | "image" | "file" | "embed" | "system"
   attachments?: MessageAttachment[]
   embeds?: MessageEmbed[]
-  reactions?: MessageReaction[]
   reply_to?: string
   edited_at?: string
   created_at: string

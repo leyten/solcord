@@ -7,7 +7,6 @@ import { format, isToday, isYesterday } from "date-fns"
 import { MoreHorizontal, Reply, Edit, Trash2, Copy } from "lucide-react"
 import { MessageAttachments } from "@/components/messages/message-attachments"
 import { MessageEmbeds } from "@/components/messages/message-embeds"
-import { MessageReactions } from "@/components/messages/message-reactions"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
 import type { Message } from "@/lib/types/messages"
@@ -340,13 +339,6 @@ export function MessageItem({
         {message.embeds && message.embeds.length > 0 && (
           <div className="mt-2">
             <MessageEmbeds embeds={message.embeds} />
-          </div>
-        )}
-
-        {/* Reactions */}
-        {message.reactions && message.reactions.length > 0 && (
-          <div className="mt-2">
-            <MessageReactions messageId={message.id} reactions={message.reactions} />
           </div>
         )}
       </div>

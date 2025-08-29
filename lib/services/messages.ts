@@ -78,7 +78,6 @@ export class OptimizedMessagesService {
         message_type: msg.message_type,
         attachments: msg.attachments || [],
         embeds: msg.embeds || [],
-        reactions: [],
         reply_to: msg.reply_to,
         edited_at: msg.edited_at,
         created_at: msg.created_at,
@@ -107,6 +106,7 @@ export class OptimizedMessagesService {
     serverId: string,
     limit = 25,
     before?: string,
+    currentUserId?: string,
   ): Promise<{ messages: Message[]; hasMore: boolean }> {
     const cacheKey = `${serverId}-${channelId}-${before || "latest"}-${limit}`
 
@@ -174,28 +174,31 @@ export class OptimizedMessagesService {
       }
 
       // Transform messages
-      const transformedMessages: Message[] = messages.reverse().map((msg) => ({
-        id: msg.id,
-        channel_id: msg.channel_id,
-        server_id: msg.server_id,
-        author_id: msg.author_id,
-        content: msg.content,
-        message_type: msg.message_type,
-        attachments: msg.attachments || [],
-        embeds: msg.embeds || [],
-        reactions: [], // TODO: Fetch reactions
-        reply_to: msg.reply_to,
-        edited_at: msg.edited_at,
-        created_at: msg.created_at,
-        updated_at: msg.updated_at,
-        author: this.authorCache.get(msg.author_id) || {
-          id: msg.author_id,
-          name: "Unknown User",
-          username: "unknown",
-          avatar: "",
-          rank: "Holder",
-        },
-      }))
+      const transformedMessages: Message[] = []
+
+      for (const msg of messages.reverse()) {
+        transformedMessages.push({
+          id: msg.id,
+          channel_id: msg.channel_id,
+          server_id: msg.server_id,
+          author_id: msg.author_id,
+          content: msg.content,
+          message_type: msg.message_type,
+          attachments: msg.attachments || [],
+          embeds: msg.embeds || [],
+          reply_to: msg.reply_to,
+          edited_at: msg.edited_at,
+          created_at: msg.created_at,
+          updated_at: msg.updated_at,
+          author: this.authorCache.get(msg.author_id) || {
+            id: msg.author_id,
+            name: "Unknown User",
+            username: "unknown",
+            avatar: "",
+            rank: "Holder",
+          },
+        })
+      }
 
       // Cache the result
       this.messageCache.set(cacheKey, transformedMessages)
@@ -270,7 +273,6 @@ export class OptimizedMessagesService {
         message_type: data.attachments?.length ? "image" : embeds.length ? "embed" : "text",
         attachments: data.attachments || [],
         embeds: embeds,
-        reactions: [],
         reply_to: data.reply_to || undefined,
         edited_at: undefined,
         created_at: new Date().toISOString(),
@@ -505,7 +507,6 @@ export class OptimizedMessagesService {
                 message_type: msg.message_type,
                 attachments: msg.attachments || [],
                 embeds: msg.embeds || [],
-                reactions: [],
                 reply_to: msg.reply_to,
                 edited_at: msg.edited_at,
                 created_at: msg.created_at,
@@ -554,7 +555,6 @@ export class OptimizedMessagesService {
                 message_type: msg.message_type,
                 attachments: msg.attachments || [],
                 embeds: msg.embeds || [],
-                reactions: [],
                 reply_to: msg.reply_to,
                 edited_at: msg.edited_at,
                 created_at: msg.created_at,
