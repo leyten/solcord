@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { messagesService } from "@/lib/services/messages"
 import { useProfile } from "@/contexts/profile-context"
 import { tokenServerService } from "@/lib/services/token-servers"
+import { membersService } from "@/lib/services/members"
 
 interface ChatAreaProps {
   server: Server
@@ -236,7 +237,7 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
         <div className="flex-1 flex flex-col items-center justify-center text-center text-neutral-500">
           <Lock className="w-16 h-16 mb-4 text-neutral-600" />
           <h3 className="text-lg font-semibold text-neutral-300 mb-2">Channel Restricted</h3>
-          <p className="text-sm mb-1">This channel requires {channel.minTokenPercentage}%+ token holdings</p>
+          <p className="text-sm mb-2">This channel requires {channel.minTokenPercentage}%+ token holdings</p>
           <p className="text-xs text-neutral-600">You currently hold {userTokenPercentage.toFixed(3)}%</p>
         </div>
       </div>
@@ -421,6 +422,10 @@ interface ChatInputProps {
 function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermissions, onMessageSent }: ChatInputProps) {
   const [message, setMessage] = useState("")
   const [showMentions, setShowMentions] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState("")
+  const [mentionPosition, setMentionPosition] = useState(0)
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
+  const [serverMembers, setServerMembers] = useState<ChannelUser[]>([])
   const [isSending, setIsSending] = useState(false)
   const [spamError, setSpamError] = useState<string | null>(null)
   const [cooldownRemaining, setCooldownRemaining] = useState(0)
@@ -429,6 +434,16 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
   const [attachedFiles, setAttachedFiles] = useState<File[]>([])
   const [uploadingFiles, setUploadingFiles] = useState<boolean>(false)
   const { profile } = useProfile()
+
+  useEffect(() => {
+    const fetchMembers = async () => {
+      if (server?.id) {
+        const members = await membersService.getServerMembers(server.id)
+        setServerMembers(members)
+      }
+    }
+    fetchMembers()
+  }, [server?.id])
 
   useEffect(() => {
     const handlePaste = (e: ClipboardEvent) => {
@@ -507,6 +522,35 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (!canWrite) return
 
+    if (showMentions) {
+      const filteredMembers = serverMembers
+        .filter((member) => member.name.toLowerCase().includes(mentionQuery.toLowerCase()))
+        .slice(0, 5)
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault()
+        setSelectedMentionIndex((prev) => Math.min(prev + 1, filteredMembers.length - 1))
+        return
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault()
+        setSelectedMentionIndex((prev) => Math.max(prev - 1, 0))
+        return
+      }
+      if (e.key === "Tab" || e.key === "Enter") {
+        e.preventDefault()
+        if (filteredMembers[selectedMentionIndex]) {
+          insertMention(filteredMembers[selectedMentionIndex].name)
+        }
+        return
+      }
+      if (e.key === "Escape") {
+        e.preventDefault()
+        setShowMentions(false)
+        return
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -583,6 +627,7 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
     if (!canWrite) return
 
     const value = e.target.value
+    const cursorPos = e.target.selectionStart
     setMessage(value)
 
     if (spamError && cooldownRemaining === 0) {
@@ -594,8 +639,22 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
     }
 
-    const lastWord = value.split(" ").pop() || ""
-    setShowMentions(lastWord.startsWith("@") && lastWord.length > 1)
+    const textBeforeCursor = value.substring(0, cursorPos)
+    const lastAtIndex = textBeforeCursor.lastIndexOf("@")
+
+    if (lastAtIndex !== -1) {
+      const textAfterAt = textBeforeCursor.substring(lastAtIndex + 1)
+      if (!textAfterAt.includes(" ") && textAfterAt.length >= 0) {
+        setMentionQuery(textAfterAt)
+        setMentionPosition(lastAtIndex)
+        setShowMentions(true)
+        setSelectedMentionIndex(0)
+      } else {
+        setShowMentions(false)
+      }
+    } else {
+      setShowMentions(false)
+    }
   }
 
   const handleFileUpload = () => {
@@ -625,27 +684,23 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
     const textarea = textareaRef.current
     if (!textarea) return
 
-    const cursorPos = textarea.selectionStart
-    const textBefore = message.substring(0, cursorPos)
-    const textAfter = message.substring(cursorPos)
+    const newMessage =
+      message.substring(0, mentionPosition) +
+      `@${username} ` +
+      message.substring(mentionPosition + mentionQuery.length + 1)
+    setMessage(newMessage)
+    setShowMentions(false)
 
-    const lastAtIndex = textBefore.lastIndexOf("@")
-    if (lastAtIndex !== -1) {
-      const newMessage = textBefore.substring(0, lastAtIndex) + `@${username} ` + textAfter
-      setMessage(newMessage)
-      setShowMentions(false)
-
-      setTimeout(() => {
-        textarea.focus()
-        const newCursorPos = lastAtIndex + username.length + 2
-        textarea.setSelectionRange(newCursorPos, newCursorPos)
-      }, 0)
-    }
+    setTimeout(() => {
+      textarea.focus()
+      const newCursorPos = mentionPosition + username.length + 2
+      textarea.setSelectionRange(newCursorPos, newCursorPos)
+    }, 0)
   }
 
-  const mockUsers = ["alice", "bob", "charlie", "diana"]
-  const mentionQuery = message.split(" ").pop()?.substring(1).toLowerCase() || ""
-  const filteredUsers = mockUsers.filter((user) => user.toLowerCase().includes(mentionQuery)).slice(0, 5)
+  const filteredMembers = showMentions
+    ? serverMembers.filter((member) => member.name.toLowerCase().includes(mentionQuery.toLowerCase())).slice(0, 5)
+    : []
 
   const getPlaceholder = () => {
     if (isCheckingPermissions) return "Checking permissions..."
@@ -754,6 +809,34 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
           </div>
         </div>
       </div>
+
+      {showMentions && filteredMembers.length > 0 && (
+        <div className="absolute bottom-full left-0 right-0 mb-2 bg-neutral-800 border border-neutral-700 rounded-none shadow-lg max-h-40 overflow-y-auto">
+          {filteredMembers.map((member, index) => (
+            <button
+              key={member.id}
+              onClick={() => insertMention(member.name)}
+              className={`w-full px-3 py-2 text-left text-sm hover:bg-neutral-700 flex items-center space-x-2 ${
+                index === selectedMentionIndex ? "bg-neutral-700" : ""
+              }`}
+            >
+              {member.avatar ? (
+                <img
+                  src={member.avatar || "/placeholder.svg"}
+                  alt={member.name}
+                  className="w-6 h-6 rounded-none object-cover"
+                />
+              ) : (
+                <div className="w-6 h-6 rounded-none bg-neutral-600 flex items-center justify-center text-xs text-neutral-300">
+                  {member.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="text-neutral-200">{member.name}</span>
+              {member.online && <div className="w-2 h-2 bg-green-500 rounded-full ml-auto"></div>}
+            </button>
+          ))}
+        </div>
+      )}
 
       <input
         ref={fileInputRef}
