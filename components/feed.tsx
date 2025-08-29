@@ -31,6 +31,7 @@ export function Feed({ server, channel }: FeedProps) {
   const [canWrite, setCanWrite] = useState(true)
   const [isCheckingPermissions, setIsCheckingPermissions] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const isAnnouncementsChannel = channel.id === "announcements"
 
@@ -299,6 +300,37 @@ export function Feed({ server, channel }: FeedProps) {
   }
 
   useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!canWrite) return
+
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      const files: File[] = []
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.kind === "file") {
+          const file = item.getAsFile()
+          if (file) {
+            files.push(file)
+          }
+        }
+      }
+
+      if (files.length > 0) {
+        e.preventDefault()
+        setAttachedFiles((prev) => [...prev, ...files])
+        if (textareaRef.current) {
+          textareaRef.current.focus()
+        }
+      }
+    }
+
+    document.addEventListener("paste", handlePaste)
+    return () => document.removeEventListener("paste", handlePaste)
+  }, [canWrite])
+
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
         e.target instanceof HTMLInputElement ||
@@ -392,6 +424,7 @@ export function Feed({ server, channel }: FeedProps) {
             </div>
             <div className="flex-1 space-y-3">
               <Textarea
+                ref={textareaRef}
                 placeholder="What's happening in the community?"
                 value={newPost}
                 onChange={(e) => setNewPost(e.target.value)}

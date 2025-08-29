@@ -431,6 +431,37 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
   const { profile } = useProfile()
 
   useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      if (!canWrite || !textareaRef.current) return
+
+      const items = e.clipboardData?.items
+      if (!items) return
+
+      const files: File[] = []
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]
+        if (item.kind === "file") {
+          const file = item.getAsFile()
+          if (file) {
+            files.push(file)
+          }
+        }
+      }
+
+      if (files.length > 0) {
+        e.preventDefault()
+        setAttachedFiles((prev) => [...prev, ...files])
+      }
+    }
+
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.addEventListener("paste", handlePaste)
+      return () => textarea.removeEventListener("paste", handlePaste)
+    }
+  }, [canWrite])
+
+  useEffect(() => {
     if (cooldownRemaining > 0) {
       const timer = setInterval(() => {
         setCooldownRemaining((prev) => {
@@ -576,6 +607,12 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
     if (!canWrite) return
     const files = Array.from(e.target.files || [])
     setAttachedFiles((prev) => [...prev, ...files])
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus()
+      }
+    }, 0)
   }
 
   const removeFile = (index: number) => {
@@ -701,7 +738,7 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
             <Button
               onClick={handleSend}
               disabled={(!message.trim() && attachedFiles.length === 0) || isDisabled}
-              className="hover:text-neutral-300 border-0 rounded-none h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed text-neutral-500 bg-transparent px-0.5"
+              className="hover:text-neutral-300 hover:bg-transparent border-0 rounded-none h-8 text-sm disabled:opacity-50 disabled:cursor-not-allowed text-neutral-500 bg-transparent px-0.5"
               title={!canWrite ? "You need 10,000 tokens to send messages" : undefined}
             >
               {isSending || uploadingFiles ? (
