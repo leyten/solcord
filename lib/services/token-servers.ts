@@ -89,7 +89,6 @@ export class TokenServerService {
     authToken?: string,
   ): Promise<{ success: boolean; server?: Server; error?: string }> {
     try {
-      console.log("Joining server with:", { tokenCA, userId, walletAddress })
 
       const response = await fetch("/api/servers/join", {
         method: "POST",
@@ -110,7 +109,6 @@ export class TokenServerService {
       }
 
       const data = await response.json()
-      console.log("Successfully joined server")
       return { success: true, server: data.server }
     } catch (error) {
       console.error("Error in joinServer:", error)
@@ -171,7 +169,6 @@ export class TokenServerService {
       }
 
       const data = await response.json()
-      console.log("✅ Successfully updated memberships:", data.updates)
     } catch (error) {
       console.error("Error updating user memberships:", error)
     }
@@ -199,7 +196,6 @@ export class TokenServerService {
 
   async getUserHoldingPercentage(userId: string, serverId: string): Promise<number> {
     try {
-      console.log("[v0] getUserHoldingPercentage called:", { userId, serverId })
 
       // Get the membership with token_balance
       const { data: membership, error: membershipError } = await this.supabase
@@ -209,21 +205,17 @@ export class TokenServerService {
         .eq("server_id", serverId)
         .maybeSingle()
 
-      console.log("[v0] getUserHoldingPercentage membership query:", { membership, membershipError })
 
       if (membershipError || !membership) {
-        console.error("Error fetching user membership:", membershipError)
         return 0
       }
 
       const decimals = 6 // Standard for most Solana tokens
       const tokenBalanceRaw = membership.token_balance || 0
 
-      console.log("[v0] getUserHoldingPercentage calculation:", { tokenBalanceRaw, decimals })
 
       // Calculate percentage from raw balance
       const percentage = this.calculateHoldingPercentage(tokenBalanceRaw, decimals)
-      console.log("[v0] getUserHoldingPercentage result:", { percentage })
 
       return percentage
     } catch (error) {
@@ -287,7 +279,6 @@ export class TokenServerService {
         return { success: false, error: error.error || "Failed to leave server" }
       }
 
-      console.log(`User ${userId} successfully left server ${serverId}`)
       return { success: true }
     } catch (error) {
       console.error("Error in leaveServer:", error)
@@ -297,10 +288,8 @@ export class TokenServerService {
 
   async getUserTokenPercentage(serverId: string): Promise<number> {
     try {
-      console.log("[v0] getUserTokenPercentage called:", { serverId })
 
       if (!this.supabase.auth.getUser) {
-        console.log("[v0] getUserTokenPercentage: No auth user function")
         return 0
       }
 
@@ -308,10 +297,8 @@ export class TokenServerService {
         data: { user },
       } = await this.supabase.auth.getUser()
 
-      console.log("[v0] getUserTokenPercentage auth user:", { user: user ? { id: user.id } : null })
 
       if (!user) {
-        console.log("[v0] getUserTokenPercentage: No authenticated user")
         return 0
       }
 
@@ -322,21 +309,15 @@ export class TokenServerService {
         .eq("server_id", serverId)
         .maybeSingle()
 
-      console.log("[v0] getUserTokenPercentage membership:", { membership, error })
 
       if (error || !membership) {
-        console.log("[v0] getUserTokenPercentage: No membership found")
         return 0
       }
 
       const tokenBalanceRaw = membership.token_balance || 0
       const minimumFor1Percent = 10_000_000_000_000 // 10 trillion raw units = 10M tokens = 1%
 
-      console.log("[v0] getUserTokenPercentage balance check:", {
-        tokenBalanceRaw,
-        minimumFor1Percent,
-        hasAccess: tokenBalanceRaw >= minimumFor1Percent,
-      })
+
 
       // Return 1.0 if user has 1%+ tokens, 0 otherwise
       return tokenBalanceRaw >= minimumFor1Percent ? 1.0 : 0

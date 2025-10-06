@@ -7,26 +7,19 @@ export async function POST(request: NextRequest) {
   try {
     // Verify Privy authentication
     const authHeader = request.headers.get("authorization")
-    console.log("[v0] Join server - Auth header present:", !!authHeader)
-    console.log("[v0] Join server - Auth header value:", authHeader?.substring(0, 20) + "...")
 
     if (!authHeader?.startsWith("Bearer ")) {
-      console.log("[v0] Join server - No Bearer token in header")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const token = authHeader.substring(7)
-    console.log("[v0] Join server - Verifying token...")
     const verifiedUser = await verifyPrivyToken(token)
-    console.log("[v0] Join server - Verified user:", verifiedUser)
 
     if (!verifiedUser) {
-      console.log("[v0] Join server - Token verification failed")
       return NextResponse.json({ error: "Invalid token" }, { status: 401 })
     }
 
     const userId = verifiedUser.userId
-    console.log("[v0] Join server - User ID:", userId)
 
     const { tokenCA, walletAddress } = await request.json()
 
@@ -114,7 +107,6 @@ export async function POST(request: NextRequest) {
         console.error("Error creating default channels:", channelsError)
         // Don't fail the entire request if channels fail to create
       } else {
-        console.log(`✅ Created ${defaultChannels.length} default channels for server ${server.id}`)
       }
     }
 

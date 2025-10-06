@@ -49,7 +49,6 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         setProfile(null)
       } else {
         setProfile(data)
-        console.log("👤 Profile loaded:", data.name)
       }
     } catch (error) {
       console.error("Error in loadProfile:", error)
@@ -78,7 +77,6 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
     const setOnline = async () => {
       try {
-        console.log("🟢 Setting user online:", profile.name)
         await updateStatus("online")
       } catch (error) {
         console.error("Error setting user online:", error)
@@ -93,7 +91,6 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     if (!profile?.id) return
 
     const setOfflineOnExit = () => {
-      console.log("🔴 Setting user offline on exit")
 
       // Use sendBeacon for reliable offline status on page unload
       const data = new FormData()
@@ -103,13 +100,11 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
         // Try sendBeacon first (most reliable for page unload)
         if (navigator.sendBeacon) {
           const success = navigator.sendBeacon("/api/update-status", data)
-          console.log("📡 sendBeacon result:", success)
         } else {
           // Fallback to synchronous XHR
           const xhr = new XMLHttpRequest()
           xhr.open("POST", "/api/update-status", false) // synchronous
           xhr.send(data)
-          console.log("📡 XHR fallback completed")
         }
       } catch (error) {
         console.error("Error setting offline status:", error)
@@ -118,11 +113,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
     // Handle page visibility changes
     const handleVisibilityChange = () => {
-      console.log("👁️ Visibility changed:", document.visibilityState)
 
       if (document.visibilityState === "visible") {
         // User came back to the tab - set them online
-        console.log("🟢 Tab visible - setting online")
         updateStatus("online")
       }
       // Don't set offline on hidden - only on actual tab closing
@@ -164,7 +157,6 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       }
 
       setProfile(data)
-      console.log("✅ Profile updated:", updates)
       return true
     } catch (error) {
       console.error("Error in updateProfile:", error)
@@ -190,7 +182,6 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
       }
 
       setProfile((prev) => (prev ? { ...prev, status } : null))
-      console.log(`📊 Status updated to: ${status}`)
       return true
     } catch (error) {
       console.error("Error in updateStatus:", error)

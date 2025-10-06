@@ -66,7 +66,6 @@ class FeedService {
       })
     } catch (error) {
       // If the function doesn't exist, we'll handle it differently
-      console.log("set_claim function not available, using alternative method")
     }
   }
 
@@ -78,7 +77,6 @@ class FeedService {
     userId?: string,
   ): Promise<FeedPost[]> {
     try {
-      console.log(`📰 Fetching posts for server: ${serverId}, channel: ${channelId}`)
 
       // Set user context if available
       if (userId) {
@@ -113,7 +111,6 @@ class FeedService {
       }
 
       if (!posts) {
-        console.log(`📭 No posts found for server ${serverId}, channel ${channelId}`)
         return []
       }
 
@@ -154,8 +151,8 @@ class FeedService {
         }
       }
 
-      console.log(`✅ Loaded ${posts.length} posts for server ${serverId}, channel ${channelId}`)
 
+      
       return posts.map((post) => ({
         ...post,
         profiles: {
@@ -183,7 +180,6 @@ class FeedService {
         return null
       }
 
-      console.log(`📝 Creating post for server: ${data.server_id}, channel: ${data.channel_id}`)
 
       const attachments: any[] = []
 
@@ -278,7 +274,6 @@ class FeedService {
         return null
       }
 
-      console.log(`✅ Post created for server ${data.server_id} (real post will come via real-time)`)
 
       // Return optimistic post for immediate UI feedback
       return optimisticPost
@@ -421,7 +416,6 @@ class FeedService {
 
   // SUBSCRIBE TO POST UPDATES - NOW SERVER-AWARE
   subscribeToPostUpdates(channelId: string, serverId: string, callback: (post: FeedPost) => void, userId?: string) {
-    console.log(`🔌 Setting up feed subscription for server: ${serverId}, channel: ${channelId}`)
 
     return this.supabase
       .channel(`feed_posts_${serverId}_${channelId}`)
@@ -435,7 +429,6 @@ class FeedService {
         },
         async (payload) => {
           if (payload.eventType === "INSERT" && payload.new) {
-            console.log(`📰 New post received for server ${serverId}:`, payload.new.id)
 
             // Fetch the complete post with profile data
             const { data: post } = await this.supabase

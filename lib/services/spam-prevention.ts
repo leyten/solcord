@@ -156,7 +156,6 @@ class SpamPreventionService {
 
     userData.cooldownUntil = Date.now() + cooldownDuration
 
-    console.log(`Applied penalty to user ${userId}: ${reason}. Cooldown: ${cooldownDuration}ms`)
   }
 
   getCooldownRemaining(userId: string): number {

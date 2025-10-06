@@ -88,7 +88,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
 
     try {
       const convs = await dmService.getUserConversations(profile.id)
-      console.log("Loaded conversations:", convs)
       setConversations(convs)
     } catch (error) {
       console.error("Failed to load conversations:", error)
@@ -100,7 +99,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
     (newMessage: DMMessage) => {
       if (!profile?.id) return
 
-      console.log("New message received:", newMessage)
 
       // Determine which conversation this message belongs to
       const otherUserId = newMessage.sender_id === profile.id ? newMessage.recipient_id : newMessage.sender_id
@@ -171,7 +169,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
 
   // Handle conversation updates from real-time - STABLE CALLBACK
   const handleConversationUpdate = useCallback(() => {
-    console.log("Conversation update received - reloading conversations")
     if (profile?.id) {
       loadConversations()
     }
@@ -294,7 +291,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
       // Upload attachments first if any
       const uploadedAttachments: MessageAttachment[] = []
       if (attachedFiles.length > 0) {
-        console.log("📎 Uploading attachments...")
         for (const file of attachedFiles) {
           const attachment = await dmService.uploadAttachment(file, profile.id)
           if (attachment) {
@@ -303,7 +299,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
             console.error("Failed to upload attachment:", file.name)
           }
         }
-        console.log("📎 Uploaded attachments:", uploadedAttachments)
       }
 
       // Create optimistic message
@@ -535,7 +530,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
 
     // If there were attachments, we can't easily restore them, so just show a message
     if (failedMessage.attachments && failedMessage.attachments.length > 0) {
-      console.log("Note: Attachments from failed message cannot be restored. Please re-attach files.")
     }
   }
 
@@ -702,7 +696,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
                             alt={conv.other_user_name}
                             className="w-full h-full object-cover"
                             onError={(e) => {
-                              console.log("Image failed to load:", conv.other_user_pfp_url)
                               e.currentTarget.style.display = "none"
                             }}
                           />
@@ -766,7 +759,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
                           alt={activeConv?.other_user_name}
                           className="w-full h-full object-cover"
                           onError={(e) => {
-                            console.log("Header image failed to load:", activeConv?.other_user_pfp_url)
                             e.currentTarget.style.display = "none"
                           }}
                         />
@@ -1004,7 +996,6 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
                                 alt={user.name}
                                 className="w-full h-full object-cover"
                                 onError={(e) => {
-                                  console.log("Search image failed to load:", user.pfp_url)
                                   e.currentTarget.style.display = "none"
                                 }}
                               />

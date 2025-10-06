@@ -24,7 +24,6 @@ class ChannelsService {
         return this.channelCache.get(serverId)!
       }
 
-      console.log(`📋 Fetching channels for server: ${serverId}`)
 
       const { data: channels, error } = await this.supabase
         .from("channels")
@@ -38,7 +37,6 @@ class ChannelsService {
       }
 
       if (!channels || channels.length === 0) {
-        console.log(`⚠️ No channels found for server ${serverId}, creating defaults`)
         return await this.createDefaultChannels(serverId)
       }
 
@@ -48,7 +46,6 @@ class ChannelsService {
       // Cache the result
       this.channelCache.set(serverId, channelSections)
 
-      console.log(`✅ Loaded ${channels.length} channels for server ${serverId}`)
       return channelSections
     } catch (error) {
       console.error("❌ Failed to fetch server channels:", error)
@@ -95,13 +92,11 @@ class ChannelsService {
 
   async createDefaultChannels(serverId: string): Promise<ChannelSection[]> {
     try {
-      console.log(`🏗️ Creating default channels for server: ${serverId}`)
 
       // First ensure the server exists
       const { data: serverExists } = await this.supabase.from("servers").select("id").eq("id", serverId).single()
 
       if (!serverExists) {
-        console.log(`⚠️ Server ${serverId} doesn't exist, creating it first`)
         const { error: serverError } = await this.supabase.from("servers").insert({
           id: serverId,
           name: serverId === "solcord" ? "Solcord" : serverId,
@@ -168,7 +163,6 @@ class ChannelsService {
         return []
       }
 
-      console.log(`✅ Created ${insertedChannels?.length || 0} default channels for server ${serverId}`)
 
       // Clear cache and return fresh data
       this.channelCache.delete(serverId)

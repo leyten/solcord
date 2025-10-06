@@ -34,7 +34,6 @@ export function LoginFlow({ onComplete }: LoginFlowProps) {
       // No profile exists, go to profile creation
       setCurrentStep("profile")
     } catch (error) {
-      console.log("Connection failed or no existing profile found")
       // If connection succeeded but no profile, go to profile step
       if (authenticated) {
         setCurrentStep("profile")
@@ -45,10 +44,8 @@ export function LoginFlow({ onComplete }: LoginFlowProps) {
   const handleBackFromProfile = async () => {
     try {
       // Set status to offline before logging out
-      console.log("🔄 Setting status to offline before logout from profile setup")
       try {
         await updateUserStatus("offline")
-        console.log("✅ Successfully set status to offline before logout")
       } catch (error) {
         console.error("❌ Failed to set status to offline before logout:", error)
         // Continue with logout even if status update fails

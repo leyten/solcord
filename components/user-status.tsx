@@ -41,12 +41,10 @@ export function UserStatus({ onOpenSettings }: UserStatusProps) {
 
   const handleStatusChange = async (newStatus: StatusType) => {
     if (newStatus !== currentStatus && authenticated && profile && !isUpdatingStatus) {
-      console.log(`🎯 USER CLICKED: Change status from ${currentStatus} to ${newStatus}`)
       setIsUpdatingStatus(true)
 
       try {
         await updateStatus(newStatus)
-        console.log(`✅ Status change completed: ${newStatus}`)
       } catch (error) {
         console.error("❌ Failed to update status:", error)
         alert(`Failed to update status: ${error}`)

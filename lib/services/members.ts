@@ -15,7 +15,6 @@ class MembersService {
 
   async getServerMembers(serverId: string): Promise<ChannelUser[]> {
     try {
-      console.log(`👥 Fetching server members for: ${serverId}`)
 
       // Check if this is the default Solcord server - show all users
       if (serverId === "solcord") {
@@ -39,7 +38,6 @@ class MembersService {
           status: profile.status || "offline",
         }))
 
-        console.log(`✅ Fetched ${members.length} Solcord members`)
         this.memberCache.set(serverId, members)
         return members
       }
@@ -86,9 +84,7 @@ class MembersService {
           status: membership.profiles.status || "offline",
         }))
 
-      console.log(
-        `✅ Fetched ${members.length} members for server ${serverId}, online: ${members.filter((m) => m.online).length}`,
-      )
+
 
       this.memberCache.set(serverId, members)
       return members
@@ -99,7 +95,6 @@ class MembersService {
   }
 
   async forceRefreshMembers(serverId: string): Promise<ChannelUser[]> {
-    console.log(`🔄 Force refreshing members for server: ${serverId}`)
     const members = await this.getServerMembers(serverId)
 
     if (ACTIVE_SERVER_ID === serverId && ACTIVE_CALLBACK) {
@@ -110,7 +105,6 @@ class MembersService {
   }
 
   subscribeToMemberUpdates(serverId: string, callback: (members: ChannelUser[]) => void): RealtimeChannel {
-    console.log(`🔌 NEW SUBSCRIPTION REQUEST for server: ${serverId}`)
 
     // KILL EVERYTHING FIRST
     this.destroyEverything()
@@ -119,11 +113,9 @@ class MembersService {
     ACTIVE_SERVER_ID = serverId
     ACTIVE_CALLBACK = callback
 
-    console.log(`✅ ACTIVE SERVER SET TO: ${ACTIVE_SERVER_ID}`)
 
     // CREATE SUBSCRIPTION
     const channelName = `members-${serverId}-${Date.now()}`
-    console.log(`📡 Creating subscription: ${channelName}`)
 
     const subscription = supabase
       .channel(channelName)
@@ -137,11 +129,9 @@ class MembersService {
         async (payload: any) => {
           // ONLY process if this is STILL the active server
           if (ACTIVE_SERVER_ID !== serverId) {
-            console.log(`🚫 IGNORING profiles change - active server is ${ACTIVE_SERVER_ID}, not ${serverId}`)
             return
           }
 
-          console.log(`🔄 Profiles change for ACTIVE server ${serverId}`)
           const updatedMembers = await this.getServerMembers(serverId)
 
           if (ACTIVE_CALLBACK && ACTIVE_SERVER_ID === serverId) {
@@ -160,11 +150,9 @@ class MembersService {
         async (payload: any) => {
           // ONLY process if this is STILL the active server
           if (ACTIVE_SERVER_ID !== serverId) {
-            console.log(`🚫 IGNORING membership change - active server is ${ACTIVE_SERVER_ID}, not ${serverId}`)
             return
           }
 
-          console.log(`🔄 Membership change for ACTIVE server ${serverId}`)
           const updatedMembers = await this.getServerMembers(serverId)
 
           if (ACTIVE_CALLBACK && ACTIVE_SERVER_ID === serverId) {
@@ -177,7 +165,6 @@ class MembersService {
           console.error(`❌ Subscription error:`, err)
         }
         if (status === "SUBSCRIBED") {
-          console.log(`✅ Successfully subscribed to ${serverId}`)
         }
       })
 
@@ -190,11 +177,9 @@ class MembersService {
   }
 
   private startHeartbeat() {
-    console.log(`💓 Starting heartbeat for ACTIVE server: ${ACTIVE_SERVER_ID}`)
 
     ACTIVE_HEARTBEAT = setInterval(async () => {
       if (!ACTIVE_SERVER_ID) {
-        console.log(`💓 No active server, killing heartbeat`)
         if (ACTIVE_HEARTBEAT) {
           clearInterval(ACTIVE_HEARTBEAT)
           ACTIVE_HEARTBEAT = null
@@ -202,7 +187,6 @@ class MembersService {
         return
       }
 
-      console.log(`💓 Heartbeat for ACTIVE server: ${ACTIVE_SERVER_ID}`)
       const members = await this.getServerMembers(ACTIVE_SERVER_ID)
 
       if (ACTIVE_CALLBACK) {
@@ -212,18 +196,15 @@ class MembersService {
   }
 
   private destroyEverything() {
-    console.log(`💀 DESTROYING EVERYTHING`)
 
     // Kill heartbeat
     if (ACTIVE_HEARTBEAT) {
-      console.log(`💀 Killing heartbeat for: ${ACTIVE_SERVER_ID}`)
       clearInterval(ACTIVE_HEARTBEAT)
       ACTIVE_HEARTBEAT = null
     }
 
     // Kill subscription
     if (ACTIVE_SUBSCRIPTION) {
-      console.log(`💀 Killing subscription for: ${ACTIVE_SERVER_ID}`)
       try {
         supabase.removeChannel(ACTIVE_SUBSCRIPTION)
       } catch (error) {
@@ -236,11 +217,9 @@ class MembersService {
     ACTIVE_SERVER_ID = null
     ACTIVE_CALLBACK = null
 
-    console.log(`💀 EVERYTHING DESTROYED`)
   }
 
   unsubscribeFromMemberUpdates(subscription: RealtimeChannel): void {
-    console.log(`🔌 Unsubscribing from member updates`)
     this.destroyEverything()
   }
 

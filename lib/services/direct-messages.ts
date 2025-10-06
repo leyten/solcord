@@ -42,7 +42,6 @@ export class DirectMessagesService {
   // Get user's conversations
   async getUserConversations(userId: string): Promise<DMConversation[]> {
     try {
-      console.log("🔍 Fetching conversations for user:", userId)
 
       const { data, error } = await this.supabase.rpc("get_user_conversations", {
         input_user_id: userId,
@@ -53,7 +52,6 @@ export class DirectMessagesService {
         return []
       }
 
-      console.log("📋 Raw conversation data:", data)
 
       return (data || []).map((conv: any) => ({
         id: conv.id,
@@ -81,7 +79,6 @@ export class DirectMessagesService {
     authToken?: string,
   ): Promise<DMMessage[]> {
     try {
-      console.log(`🔍 Getting messages between ${userId} and ${otherUserId}`)
 
       const conversationId = await this.getOrCreateConversation(userId, otherUserId, authToken)
 
@@ -90,7 +87,6 @@ export class DirectMessagesService {
         return []
       }
 
-      console.log(`🔍 Found conversation ID: ${conversationId}`)
 
       // Get messages for this conversation
       const { data: messages, error } = await this.supabase
@@ -105,7 +101,6 @@ export class DirectMessagesService {
         return []
       }
 
-      console.log(`🔍 Found ${messages?.length || 0} messages`)
 
       if (!messages || messages.length === 0) {
         return []
@@ -175,7 +170,6 @@ export class DirectMessagesService {
     authToken?: string,
   ): Promise<{ success: boolean; message?: DMMessage; error?: string; optimisticId?: string }> {
     try {
-      console.log("📤 Attempting to send DM via API:", { senderId, recipientId, content, attachments, optimisticId })
 
       const conversationId = await this.getOrCreateConversation(senderId, recipientId, authToken)
 
@@ -203,7 +197,6 @@ export class DirectMessagesService {
       }
 
       const { message } = await response.json()
-      console.log("✅ DM successfully sent via API:", message.id)
 
       return { success: true, message, optimisticId }
     } catch (error) {
@@ -282,14 +275,12 @@ export class DirectMessagesService {
 
   // Subscribe to real-time DM messages for a user
   subscribeToMessages(userId: string, onMessage: (message: DMMessage) => void, onConversationUpdate: () => void) {
-    console.log("🔌 Setting up DM real-time subscription for user:", userId)
 
     // Clean up existing subscriptions
     this.cleanup()
 
     // Create a unique channel name
     const channelName = `dm_realtime_${userId}_${Date.now()}`
-    console.log("🔌 Creating channel:", channelName)
 
     // Subscribe to new DM messages
     this.messageSubscription = this.supabase
@@ -302,15 +293,12 @@ export class DirectMessagesService {
           table: "direct_messages",
         },
         async (payload) => {
-          console.log("📨 Raw DM real-time event:", payload)
 
           if (payload.eventType === "INSERT") {
             const message = payload.new as any
-            console.log("📨 New DM message:", message)
 
             // Check if this message involves the current user
             if (message.sender_id === userId || message.recipient_id === userId) {
-              console.log("📨 Message is for current user, processing...")
 
               // Fetch sender info
               const { data: sender } = await this.supabase
@@ -338,7 +326,6 @@ export class DirectMessagesService {
                   : undefined,
               }
 
-              console.log("📨 Formatted message:", formattedMessage)
               onMessage(formattedMessage)
 
               // Update the conversation's last_message_id and last_message_at
@@ -356,22 +343,17 @@ export class DirectMessagesService {
 
               // Trigger conversation list update after a short delay to ensure DB is updated
               setTimeout(() => {
-                console.log("🔄 Triggering conversation update after new message")
                 onConversationUpdate()
               }, 100)
             } else {
-              console.log("📨 Message not for current user, ignoring")
             }
           } else if (payload.eventType === "UPDATE") {
-            console.log("📝 DM message updated (read status)")
             onConversationUpdate() // Update conversation list for read status
           }
         },
       )
       .subscribe((status) => {
-        console.log("🔌 DM messages subscription status:", status)
         if (status === "SUBSCRIBED") {
-          console.log("✅ DM real-time subscription active!")
         } else if (status === "CHANNEL_ERROR") {
           console.error("❌ DM subscription error")
         }
@@ -382,7 +364,6 @@ export class DirectMessagesService {
 
   // Clean up subscriptions
   cleanup() {
-    console.log("🧹 Cleaning up DM subscriptions")
     if (this.messageSubscription) {
       this.messageSubscription.unsubscribe()
       this.messageSubscription = null

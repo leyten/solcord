@@ -6,20 +6,16 @@ export async function POST(request: NextRequest) {
   try {
     // Verify Privy authentication
     const authHeader = request.headers.get("authorization")
-    console.log("[v0] Auth header present:", !!authHeader)
 
     if (!authHeader?.startsWith("Bearer ")) {
-      console.log("[v0] No Bearer token in auth header")
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 
     const token = authHeader.substring(7)
     const verifiedUser = await verifyPrivyToken(token)
 
-    console.log("[v0] Verified user from token:", verifiedUser)
 
     if (!verifiedUser) {
-      console.log("[v0] Token verification failed")
       return NextResponse.json({ error: "Invalid token" }, { status: 401 })
     }
 
@@ -27,24 +23,15 @@ export async function POST(request: NextRequest) {
 
     const { user1, user2 } = await request.json()
 
-    console.log("[v0] Request body - user1:", user1, "user2:", user2)
 
     if (!user1 || !user2) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 })
     }
 
     // Verify the requesting user is one of the participants
-    console.log(
-      "[v0] Authorization check - userId:",
-      userId,
-      "matches user1:",
-      userId === user1,
-      "matches user2:",
-      userId === user2,
-    )
+  
 
     if (userId !== user1 && userId !== user2) {
-      console.log("[v0] Authorization failed - user not a participant")
       return NextResponse.json({ error: "Not authorized" }, { status: 403 })
     }
 

@@ -73,7 +73,6 @@ export async function POST(request: NextRequest) {
       // Convert token balance to integer
       const tokenBalanceInt = Math.floor(userBalance * Math.pow(10, tokenData.token.decimals))
 
-      console.log(`[v0] Updating membership ${server.membership.id}: role=${newRole}, balance=${tokenBalanceInt}`)
 
       const { data: updatedData, error: updateError } = await supabase
         .from("server_memberships")
@@ -88,7 +87,6 @@ export async function POST(request: NextRequest) {
       if (updateError) {
         console.error("[v0] Error updating membership:", updateError)
       } else {
-        console.log("[v0] Successfully updated membership:", updatedData)
         updates.push({
           serverId: server.id,
           role: newRole,

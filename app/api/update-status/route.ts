@@ -11,7 +11,6 @@ export async function POST(request: NextRequest) {
     const authToken = cookieStore.get("privy-token")?.value
 
     if (!authToken) {
-      console.log("No auth token found in cookies")
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }
 

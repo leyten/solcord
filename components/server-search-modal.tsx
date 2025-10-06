@@ -114,7 +114,6 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
 
     try {
       const authToken = await getAccessToken()
-      console.log("[v0] Auth token retrieved:", authToken ? "Token present" : "No token")
 
       const result = await tokenServerService.joinServer(tokenCA.trim(), profile.id, profile.primary_wallet, authToken ?? undefined)
 

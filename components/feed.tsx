@@ -67,10 +67,8 @@ export function Feed({ server, channel }: FeedProps) {
   const loadPosts = async () => {
     setIsLoading(true)
     try {
-      console.log(`📰 Loading posts for server: ${server.id}, channel: ${channel.id}`)
       const feedPosts = await feedService.getPosts(channel.id, server.id, sortBy, profile?.id)
       setPosts(feedPosts)
-      console.log(`✅ Loaded ${feedPosts.length} posts for server ${server.id}`)
     } catch (error) {
       console.error("Error loading posts:", error)
     } finally {
@@ -99,7 +97,6 @@ export function Feed({ server, channel }: FeedProps) {
 
     setIsPosting(true)
     try {
-      console.log(`📝 Creating post for server: ${server.id}, channel: ${channel.id}`)
 
       const optimisticPost: FeedPost = {
         id: `temp-${Date.now()}`,
@@ -145,7 +142,6 @@ export function Feed({ server, channel }: FeedProps) {
       })
 
       if (post) {
-        console.log(`✅ Optimistic post created for server ${server.id}:`, post.id)
         setNewPost("")
         setAttachedFiles([])
       }

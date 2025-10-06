@@ -46,7 +46,6 @@ function SolcordUIInner() {
   // Load channels for a specific server
   const loadServerChannels = useCallback(async (serverId: string) => {
     try {
-      console.log(`📋 Loading channels for server: ${serverId}`)
       const channels = await channelsService.getServerChannels(serverId)
 
       setDynamicChannelsByServer((prev) => ({
@@ -54,7 +53,6 @@ function SolcordUIInner() {
         [serverId]: channels,
       }))
 
-      console.log(`✅ Loaded channels for server ${serverId}:`, channels)
     } catch (error) {
       console.error(`❌ Failed to load channels for server ${serverId}:`, error)
     }
@@ -66,7 +64,6 @@ function SolcordUIInner() {
 
     try {
       const tokenServers = await tokenServerService.getUserServers(profile.id)
-      console.log("Loaded user servers:", tokenServers)
       setUserServers(tokenServers)
 
       // Create server objects for token servers
@@ -97,16 +94,14 @@ function SolcordUIInner() {
       if (!profile?.id || !profile.primary_wallet) return
 
       try {
-        console.log("[v0] Refreshing user token balances...")
         const authToken = await getAccessToken()
 
         await tokenServerService.updateUserMemberships(profile.id, profile.primary_wallet, specificServerId, authToken ?? undefined)
-        console.log("[v0] Token balances refreshed successfully")
 
         // Reload servers to reflect updated balances/roles
         await loadUserServers()
       } catch (error) {
-        console.error("[v0] Error refreshing token balances:", error)
+        console.error("Error refreshing token balances:", error)
       }
     },
     [profile?.id, profile?.primary_wallet, loadUserServers, getAccessToken],
@@ -132,7 +127,6 @@ function SolcordUIInner() {
 
     // Set up 60-second interval
     const intervalId = setInterval(() => {
-      console.log("[v0] Periodic balance refresh triggered")
       refreshUserBalances()
     }, 60000) // 60 seconds
 
@@ -145,7 +139,6 @@ function SolcordUIInner() {
     // Skip refresh for default Solcord server
     if (activeServer.id === "solcord") return
 
-    console.log(`[v0] Server switched to ${activeServer.id}, refreshing balance...`)
     refreshUserBalances(activeServer.id)
   }, [activeServer?.id, profile?.id, profile?.primary_wallet, refreshUserBalances])
 
@@ -155,7 +148,6 @@ function SolcordUIInner() {
       const serverChannels = dynamicChannelsByServer[activeServer.id]
       if (serverChannels && serverChannels.length > 0 && serverChannels[0].channels.length > 0) {
         setActiveChannel(serverChannels[0].channels[0])
-        console.log(`🔄 Switched to server ${activeServer.id}, channel: ${serverChannels[0].channels[0].name}`)
       } else {
         // Load channels for this server if not loaded yet
         loadServerChannels(activeServer.id)
@@ -170,10 +162,8 @@ function SolcordUIInner() {
     const loadMembers = async () => {
       setIsLoadingMembers(true)
       try {
-        console.log(`👥 Loading members for server: ${activeServer.id}`)
         const members = await membersService.getServerMembers(activeServer.id)
         setServerMembers(members)
-        console.log(`✅ Loaded ${members.length} members for server ${activeServer.id}`)
       } catch (error) {
         console.error("❌ Failed to load server members:", error)
         setServerMembers([])
@@ -186,7 +176,6 @@ function SolcordUIInner() {
 
     // Subscribe to real-time member updates for this server
     const subscription = membersService.subscribeToMemberUpdates(activeServer.id, (updatedMembers) => {
-      console.log(`👥 Real-time member update for server ${activeServer.id}:`, updatedMembers.length)
       setServerMembers(updatedMembers)
     })
 

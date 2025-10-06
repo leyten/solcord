@@ -83,14 +83,12 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
   useEffect(() => {
     if (!channel?.id || !server?.id || !canAccessChannel) return
 
-    console.log(`🔄 Loading messages for server: ${server.id}, channel: ${channel.id}`)
 
     const loadMessages = async () => {
       setIsLoading(true)
       setError(null)
       try {
         const result = await messagesService.getChannelMessages(channel.id, server.id)
-        console.log(`📥 Loaded ${result.messages.length} messages for ${server.id}/${channel.id}`)
         setMessages(result.messages)
         setHasMore(result.hasMore)
 
@@ -109,16 +107,12 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
 
     loadMessages()
 
-    console.log(`🔌 Setting up real-time subscription for: ${server.id}/${channel.id}`)
     const subscription = messagesService.subscribeToChannel(channel.id, server.id, {
       onInsert: (newMessage) => {
-        console.log("📨 New message received via real-time:", newMessage.author.name, "->", newMessage.content)
         setMessages((prev) => {
           if (prev.some((msg) => msg.id === newMessage.id)) {
-            console.log("⚠️ Duplicate message detected, skipping")
             return prev
           }
-          console.log("✅ Adding new message to state")
           const newMessages = [...prev, newMessage]
 
           setTimeout(() => {
@@ -131,17 +125,14 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
         })
       },
       onUpdate: (updatedMessage) => {
-        console.log("✏️ Message updated via real-time:", updatedMessage.author.name)
         setMessages((prev) => prev.map((msg) => (msg.id === updatedMessage.id ? updatedMessage : msg)))
       },
       onDelete: (deletedMessageId) => {
-        console.log("🗑️ Message deleted via real-time:", deletedMessageId)
         setMessages((prev) => prev.filter((msg) => msg.id !== deletedMessageId))
       },
     })
 
     return () => {
-      console.log(`🧹 Cleaning up subscription for: ${server.id}/${channel.id}`)
       messagesService.unsubscribeFromChannel(channel.id, server.id)
     }
   }, [channel.id, server.id, canAccessChannel])
@@ -356,14 +347,11 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
           canWrite={canWrite && canAccessChannel}
           isCheckingPermissions={isCheckingPermissions}
           onMessageSent={(message) => {
-            console.log("📤 Message sent callback triggered:", message.content)
             setReplyingTo(null)
             setMessages((prev) => {
               if (prev.some((msg) => msg.id === message.id)) {
-                console.log("⚠️ Duplicate message detected in optimistic update, skipping")
                 return prev
               }
-              console.log("✅ Adding optimistic message to state")
               const newMessages = [...prev, message]
 
               setTimeout(() => {
@@ -576,7 +564,6 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
     )
       return
 
-    console.log(`📤 Attempting to send message: "${message.trim()}" to server: ${server.id}, channel: ${channel.id}`)
 
     setIsSending(true)
     setSpamError(null)
@@ -608,7 +595,6 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
       )
 
       if (result.success && result.message) {
-        console.log("✅ Message sent successfully:", result.message.content)
         setMessage("")
         setAttachedFiles([])
 

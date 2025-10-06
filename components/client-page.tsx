@@ -31,7 +31,6 @@ export function ClientPage({ hasProfile: initialHasProfile }: ClientPageProps) {
           const profile = await getProfile()
           setHasProfile(!!profile)
         } catch (error) {
-          console.log("No existing profile found")
           setHasProfile(false)
         } finally {
           setIsCheckingProfile(false)

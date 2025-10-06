@@ -296,10 +296,8 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
       setIsLoggingOut(true)
 
       // Set status to offline before logging out
-      console.log("🔄 Setting status to offline before logout")
       try {
         await updateUserStatus("offline")
-        console.log("✅ Successfully set status to offline before logout")
       } catch (error) {
         console.error("❌ Failed to set status to offline before logout:", error)
         // Continue with logout even if status update fails

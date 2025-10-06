@@ -103,7 +103,6 @@ export function Settings({ onClose }: SettingsProps) {
       }
     } else {
       // Handle other settings saves here
-      console.log("Saving other settings...")
       onClose()
     }
   }
