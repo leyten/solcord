@@ -32,11 +32,22 @@ interface WalletData {
 }
 
 export class SolanaTrackerService {
-  private baseUrl = "/api/solana-tracker"
+  private getBaseUrl(): string {
+    // Check if running on server side
+    if (typeof window === "undefined") {
+      // Server side - use absolute URL
+      return process.env.NEXT_PUBLIC_SITE_URL
+        ? `${process.env.NEXT_PUBLIC_SITE_URL}/api/solana-tracker`
+        : "http://localhost:3000/api/solana-tracker"
+    }
+    // Client side - use relative URL
+    return "/api/solana-tracker"
+  }
 
   async getTokenData(tokenAddress: string): Promise<TokenData | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/token/${tokenAddress}`)
+      const baseUrl = this.getBaseUrl()
+      const response = await fetch(`${baseUrl}/token/${tokenAddress}`)
 
       if (!response.ok) {
         console.error(`Failed to fetch token data: ${response.status}`)
@@ -53,7 +64,8 @@ export class SolanaTrackerService {
 
   async getWalletBalances(walletAddress: string): Promise<WalletData | null> {
     try {
-      const response = await fetch(`${this.baseUrl}/wallet/${walletAddress}`)
+      const baseUrl = this.getBaseUrl()
+      const response = await fetch(`${baseUrl}/wallet/${walletAddress}`)
 
       if (!response.ok) {
         console.error(`Failed to fetch wallet data: ${response.status}`)

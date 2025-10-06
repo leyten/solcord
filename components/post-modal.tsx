@@ -11,6 +11,7 @@ import { feedService } from "@/lib/services/feed"
 import { useProfile } from "@/contexts/profile-context"
 import { ProfileView } from "@/components/profile-view"
 import { tokenServerService } from "@/lib/services/token-servers"
+import { usePrivy } from "@privy-io/react-auth"
 
 interface PostModalProps {
   post: FeedPost
@@ -22,6 +23,7 @@ interface PostModalProps {
 
 export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: PostModalProps) {
   const { profile } = useProfile()
+  const { getAccessToken } = usePrivy()
   const [comments, setComments] = useState<FeedComment[]>([])
   const [newComment, setNewComment] = useState("")
   const [isLoadingComments, setIsLoadingComments] = useState(true)
@@ -130,10 +132,12 @@ export function PostModal({ post, onClose, onLike, onRetweet, onProfileClick }: 
     }))
 
     try {
+      const authToken = await getAccessToken()
       const comment = await feedService.createComment({
         post_id: post.id,
         content,
         userId: profile.id,
+        authToken: authToken ?? undefined,
       })
       if (comment) {
         setNewComment("")

@@ -11,6 +11,7 @@ import { useProfile } from "@/contexts/profile-context"
 import { PostModal } from "@/components/post-modal"
 import { ProfileView } from "@/components/profile-view"
 import { tokenServerService } from "@/lib/services/token-servers"
+import { usePrivy } from "@privy-io/react-auth"
 
 interface FeedProps {
   server: Server // 🔥 NEW PROP
@@ -20,6 +21,7 @@ interface FeedProps {
 
 export function Feed({ server, channel }: FeedProps) {
   const { profile } = useProfile()
+  const { getAccessToken } = usePrivy()
   const [sortBy, setSortBy] = useState<"top" | "latest">("latest")
   const [newPost, setNewPost] = useState("")
   const [posts, setPosts] = useState<FeedPost[]>([])
@@ -132,12 +134,14 @@ export function Feed({ server, channel }: FeedProps) {
 
       setPosts((prev) => [optimisticPost, ...prev])
 
+      const authToken = await getAccessToken()
       const post = await feedService.createPost({
         channel_id: channel.id,
         server_id: server.id,
         content: newPost.trim() || undefined,
         attachments: attachedFiles.length > 0 ? attachedFiles : undefined,
         userId: profile.id,
+        authToken: authToken ?? undefined,
       })
 
       if (post) {

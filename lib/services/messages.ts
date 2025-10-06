@@ -217,6 +217,7 @@ export class OptimizedMessagesService {
     serverId: string,
     authorId: string,
     data: SendMessageData,
+    authToken?: string,
   ): Promise<{ success: boolean; message?: Message; error?: string; cooldownRemaining?: number }> {
     try {
       // Check spam prevention
@@ -286,30 +287,34 @@ export class OptimizedMessagesService {
         },
       }
 
-      const messageData = {
-        channel_id: channelId,
-        server_id: serverId,
-        author_id: authorId,
-        content: data.content || null,
-        message_type: data.attachments?.length ? "image" : embeds.length ? "embed" : "text",
-        attachments: data.attachments || null,
-        embeds: embeds.length > 0 ? embeds : null,
-        reply_to: data.reply_to || null,
-      }
+      const response = await fetch("/api/messages/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({
+          channelId,
+          serverId,
+          content: data.content || null,
+          messageType: data.attachments?.length ? "image" : embeds.length ? "embed" : "text",
+          attachments: data.attachments || null,
+          embeds: embeds.length > 0 ? embeds : null,
+          replyTo: data.reply_to || null,
+        }),
+      })
 
-      console.log(`📤 Sending message to server ${serverId}, channel ${channelId}:`, messageData)
-
-      const { data: newMessage, error } = await this.supabase.from("messages").insert(messageData).select("*").single()
-
-      if (error) {
-        console.error("❌ Database error sending message:", error)
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error("❌ API error sending message:", errorData)
         return {
           success: false,
-          error: "Failed to send message",
+          error: errorData.error || "Failed to send message",
         }
       }
 
-      console.log(`✅ Message successfully inserted for server ${serverId}:`, newMessage.id)
+      const { message: newMessage } = await response.json()
+      console.log(`✅ Message successfully sent via API for server ${serverId}:`, newMessage.id)
 
       // Record message for spam prevention
       spamPreventionService.recordMessage(authorId, data.content || "")
@@ -320,7 +325,7 @@ export class OptimizedMessagesService {
       // Return successful message with REAL ID
       const finalMessage: Message = {
         ...optimisticMessage,
-        id: newMessage.id, // Replace temp ID with real ID
+        id: newMessage.id,
         created_at: newMessage.created_at,
         updated_at: newMessage.updated_at,
       }
@@ -339,18 +344,19 @@ export class OptimizedMessagesService {
   }
 
   // Edit message with optimistic update
-  async editMessage(messageId: string, content: string): Promise<boolean> {
+  async editMessage(messageId: string, content: string, authToken?: string): Promise<boolean> {
     try {
-      const { error } = await this.supabase
-        .from("messages")
-        .update({
-          content,
-          edited_at: new Date().toISOString(),
-        })
-        .eq("id", messageId)
+      const response = await fetch("/api/messages/edit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({ messageId, content }),
+      })
 
-      if (error) {
-        console.error("Error editing message:", error)
+      if (!response.ok) {
+        console.error("Error editing message via API")
         return false
       }
 
@@ -372,12 +378,19 @@ export class OptimizedMessagesService {
   }
 
   // Delete message with optimistic update
-  async deleteMessage(messageId: string): Promise<boolean> {
+  async deleteMessage(messageId: string, authToken?: string): Promise<boolean> {
     try {
-      const { error } = await this.supabase.from("messages").delete().eq("id", messageId)
+      const response = await fetch("/api/messages/delete", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({ messageId }),
+      })
 
-      if (error) {
-        console.error("Error deleting message:", error)
+      if (!response.ok) {
+        console.error("Error deleting message via API")
         return false
       }
 

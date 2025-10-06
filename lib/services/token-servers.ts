@@ -86,112 +86,32 @@ export class TokenServerService {
     tokenCA: string,
     userId: string,
     walletAddress: string,
+    authToken?: string,
   ): Promise<{ success: boolean; server?: Server; error?: string }> {
     try {
       console.log("Joining server with:", { tokenCA, userId, walletAddress })
 
-      // Get token data and check user balance
-      const [tokenData, walletData] = await Promise.all([
-        solanaTracker.getTokenData(tokenCA),
-        solanaTracker.getWalletBalances(walletAddress),
-      ])
+      const response = await fetch("/api/servers/join", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({
+          tokenCA,
+          walletAddress,
+        }),
+      })
 
-      if (!tokenData) {
-        return { success: false, error: "Invalid token address" }
+      if (!response.ok) {
+        const error = await response.json()
+        console.error("❌ API error joining server:", error)
+        return { success: false, error: error.error || "Failed to join server" }
       }
 
-      if (!walletData) {
-        return { success: false, error: "Could not fetch wallet data" }
-      }
-
-      // Find user's balance for this token
-      const userToken = walletData.tokens.find((t) => t.token.mint === tokenCA)
-      const userBalance = userToken?.balance || 0
-      const hasMinimumTokens = solanaTracker.hasMinimumTokens(userBalance, tokenData.token.decimals, 10000)
-
-      console.log("User token balance:", { userBalance, hasMinimumTokens })
-
-      // Check if server exists
-      let { data: server, error: serverError } = await this.supabase
-        .from("servers")
-        .select("*")
-        .eq("token_ca", tokenCA)
-        .maybeSingle()
-
-      if (serverError) {
-        console.error("Error checking server:", serverError)
-        return { success: false, error: "Database error" }
-      }
-
-      // Create server if it doesn't exist
-      if (!server) {
-        console.log("Creating new server...")
-        const { data: newServer, error: createError } = await this.supabase
-          .from("servers")
-          .insert({
-            token_ca: tokenCA,
-            name: tokenData.token.name,
-            symbol: tokenData.token.symbol,
-            logo_url: tokenData.token.image,
-          })
-          .select()
-          .single()
-
-        if (createError) {
-          console.error("Error creating server:", createError)
-          return { success: false, error: `Failed to create server: ${createError.message}` }
-        }
-
-        server = newServer
-        console.log("Server created:", server)
-      }
-
-      // Check if user is already a member
-      const { data: existingMembership } = await this.supabase
-        .from("server_memberships")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("server_id", server.id)
-        .maybeSingle()
-
-      const role = hasMinimumTokens ? "member" : "guest"
-
-      // Convert token balance to integer (multiply by 10^decimals to store as smallest unit)
-      const tokenBalanceInt = Math.floor(userBalance * Math.pow(10, tokenData.token.decimals))
-
-      if (existingMembership) {
-        console.log("Updating existing membership...")
-        const { error: updateError } = await this.supabase
-          .from("server_memberships")
-          .update({
-            role,
-            token_balance: tokenBalanceInt,
-            last_verified_at: new Date().toISOString(),
-          })
-          .eq("id", existingMembership.id)
-
-        if (updateError) {
-          console.error("Error updating membership:", updateError)
-          return { success: false, error: "Failed to update membership" }
-        }
-      } else {
-        console.log("Creating new membership...")
-        const { error: membershipError } = await this.supabase.from("server_memberships").insert({
-          user_id: userId,
-          server_id: server.id,
-          role,
-          token_balance: tokenBalanceInt,
-          last_verified_at: new Date().toISOString(),
-        })
-
-        if (membershipError) {
-          console.error("Error creating membership:", membershipError)
-          return { success: false, error: "Failed to join server" }
-        }
-      }
-
+      const data = await response.json()
       console.log("Successfully joined server")
-      return { success: true, server }
+      return { success: true, server: data.server }
     } catch (error) {
       console.error("Error in joinServer:", error)
       return { success: false, error: "Unexpected error occurred" }
@@ -225,41 +145,33 @@ export class TokenServerService {
     }
   }
 
-  async updateUserMemberships(userId: string, walletAddress: string): Promise<void> {
+  async updateUserMemberships(
+    userId: string,
+    walletAddress: string,
+    serverId?: string,
+    authToken?: string,
+  ): Promise<void> {
     try {
-      // Get user's current servers
-      const userServers = await this.getUserServers(userId)
+      const response = await fetch("/api/servers/update-membership", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({
+          serverId,
+          walletAddress,
+        }),
+      })
 
-      // Get wallet data
-      const walletData = await solanaTracker.getWalletBalances(walletAddress)
-      if (!walletData) return
-
-      // Update each server membership
-      for (const server of userServers) {
-        const userToken = walletData.tokens.find((t) => t.token.mint === server.token_ca)
-        const userBalance = userToken?.balance || 0
-
-        // Get token data to check decimals
-        const tokenData = await solanaTracker.getTokenData(server.token_ca)
-        if (!tokenData) continue
-
-        const hasMinimumTokens = solanaTracker.hasMinimumTokens(userBalance, tokenData.token.decimals, 10000)
-        const newRole = hasMinimumTokens ? "member" : "guest"
-
-        // Convert token balance to integer
-        const tokenBalanceInt = Math.floor(userBalance * Math.pow(10, tokenData.token.decimals))
-
-        if (server.membership) {
-          await this.supabase
-            .from("server_memberships")
-            .update({
-              role: newRole,
-              token_balance: tokenBalanceInt,
-              last_verified_at: new Date().toISOString(),
-            })
-            .eq("id", server.membership.id)
-        }
+      if (!response.ok) {
+        const error = await response.json()
+        console.error("❌ API error updating membership:", error)
+        return
       }
+
+      const data = await response.json()
+      console.log("✅ Successfully updated memberships:", data.updates)
     } catch (error) {
       console.error("Error updating user memberships:", error)
     }
@@ -349,23 +261,30 @@ export class TokenServerService {
     }
   }
 
-  async leaveServer(userId: string, serverId: string): Promise<{ success: boolean; error?: string }> {
+  async leaveServer(
+    userId: string,
+    serverId: string,
+    authToken?: string,
+  ): Promise<{ success: boolean; error?: string }> {
     try {
       // Prevent leaving the main Solcord server
       if (serverId === "solcord") {
         return { success: false, error: "Cannot leave the main Solcord server" }
       }
 
-      // Delete the user's membership from the server
-      const { error } = await this.supabase
-        .from("server_memberships")
-        .delete()
-        .eq("user_id", userId)
-        .eq("server_id", serverId)
+      const response = await fetch("/api/servers/leave", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({ serverId }),
+      })
 
-      if (error) {
-        console.error("Error leaving server:", error)
-        return { success: false, error: "Failed to leave server" }
+      if (!response.ok) {
+        const error = await response.json()
+        console.error("❌ API error leaving server:", error)
+        return { success: false, error: error.error || "Failed to leave server" }
       }
 
       console.log(`User ${userId} successfully left server ${serverId}`)

@@ -74,18 +74,19 @@ export class DirectMessagesService {
   }
 
   // Get messages for a conversation
-  async getConversationMessages(userId: string, otherUserId: string, limit = 50): Promise<DMMessage[]> {
+  async getConversationMessages(
+    userId: string,
+    otherUserId: string,
+    limit = 50,
+    authToken?: string,
+  ): Promise<DMMessage[]> {
     try {
       console.log(`🔍 Getting messages between ${userId} and ${otherUserId}`)
 
-      // First, get or create the conversation to get the conversation_id
-      const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
-        user1: userId,
-        user2: otherUserId,
-      })
+      const conversationId = await this.getOrCreateConversation(userId, otherUserId, authToken)
 
-      if (convError) {
-        console.error("Error getting conversation:", convError)
+      if (!conversationId) {
+        console.error("Failed to get conversation ID")
         return []
       }
 
@@ -171,84 +172,40 @@ export class DirectMessagesService {
     content: string,
     attachments?: MessageAttachment[],
     optimisticId?: string,
+    authToken?: string,
   ): Promise<{ success: boolean; message?: DMMessage; error?: string; optimisticId?: string }> {
     try {
-      console.log("📤 Attempting to send DM:", { senderId, recipientId, content, attachments, optimisticId })
+      console.log("📤 Attempting to send DM via API:", { senderId, recipientId, content, attachments, optimisticId })
 
-      // Get or create conversation
-      const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
-        user1: senderId,
-        user2: recipientId,
+      const conversationId = await this.getOrCreateConversation(senderId, recipientId, authToken)
+
+      if (!conversationId) {
+        return { success: false, error: "Failed to get conversation", optimisticId }
+      }
+
+      const response = await fetch("/api/dm/send", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({
+          conversationId,
+          content,
+          attachments,
+        }),
       })
 
-      if (convError) {
-        console.error("Error getting/creating conversation:", convError)
-        return { success: false, error: "Failed to create conversation", optimisticId }
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error("❌ API error sending DM:", errorData)
+        return { success: false, error: errorData.error || "Failed to send message", optimisticId }
       }
 
-      console.log(`📤 Using conversation ID: ${conversationId}`)
+      const { message } = await response.json()
+      console.log("✅ DM successfully sent via API:", message.id)
 
-      // Insert the message
-      const { data: message, error: msgError } = await this.supabase
-        .from("direct_messages")
-        .insert({
-          conversation_id: conversationId,
-          sender_id: senderId,
-          recipient_id: recipientId,
-          content: content || null,
-          attachments: attachments || null,
-        })
-        .select("*")
-        .single()
-
-      if (msgError) {
-        console.error("Error sending message:", msgError)
-        return { success: false, error: "Failed to send message", optimisticId }
-      }
-
-      console.log("✅ DM successfully inserted:", message.id)
-
-      // Update the conversation's last_message_id and last_message_at
-      const { error: updateError } = await this.supabase
-        .from("dm_conversations")
-        .update({
-          last_message_id: message.id,
-          last_message_at: new Date().toISOString(),
-        })
-        .eq("id", conversationId)
-
-      if (updateError) {
-        console.error("Error updating conversation:", updateError)
-        // Continue anyway since the message was sent
-      }
-
-      // Get sender profile
-      const { data: senderProfile } = await this.supabase
-        .from("profiles")
-        .select("id, name, username, pfp_url")
-        .eq("id", senderId)
-        .single()
-
-      const formattedMessage: DMMessage = {
-        id: message.id,
-        conversation_id: message.conversation_id,
-        sender_id: message.sender_id,
-        recipient_id: message.recipient_id,
-        content: message.content,
-        created_at: message.created_at,
-        read_at: message.read_at,
-        attachments: message.attachments || [],
-        sender: senderProfile
-          ? {
-              id: senderProfile.id,
-              name: senderProfile.name,
-              username: senderProfile.username,
-              avatar: senderProfile.pfp_url || "",
-            }
-          : undefined,
-      }
-
-      return { success: true, message: formattedMessage, optimisticId }
+      return { success: true, message, optimisticId }
     } catch (error) {
       console.error("Error in sendMessage:", error)
       return { success: false, error: "Failed to send message", optimisticId }
@@ -256,29 +213,29 @@ export class DirectMessagesService {
   }
 
   // Mark messages as read
-  async markMessagesAsRead(userId: string, otherUserId: string): Promise<boolean> {
+  async markMessagesAsRead(userId: string, otherUserId: string, authToken?: string): Promise<boolean> {
     try {
-      // Get the conversation ID first
-      const { data: conversationId, error: convError } = await this.supabase.rpc("get_or_create_conversation", {
-        user1: userId,
-        user2: otherUserId,
-      })
+      const conversationId = await this.getOrCreateConversation(userId, otherUserId, authToken)
 
-      if (convError) {
-        console.error("Error getting conversation for read marking:", convError)
+      if (!conversationId) {
+        console.error("Failed to get conversation ID")
         return false
       }
 
-      // Mark messages as read for this conversation
-      const { error } = await this.supabase
-        .from("direct_messages")
-        .update({ read_at: new Date().toISOString() })
-        .eq("conversation_id", conversationId)
-        .eq("recipient_id", userId)
-        .is("read_at", null)
+      const response = await fetch("/api/dm/mark-read", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({
+          conversationId,
+        }),
+      })
 
-      if (error) {
-        console.error("Error marking messages as read:", error)
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error("❌ API error marking messages as read:", errorData)
         return false
       }
 
@@ -433,6 +390,31 @@ export class DirectMessagesService {
     if (this.conversationSubscription) {
       this.conversationSubscription.unsubscribe()
       this.conversationSubscription = null
+    }
+  }
+
+  private async getOrCreateConversation(user1: string, user2: string, authToken?: string): Promise<string | null> {
+    try {
+      const response = await fetch("/api/dm/get-or-create-conversation", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken && { Authorization: `Bearer ${authToken}` }),
+        },
+        body: JSON.stringify({ user1, user2 }),
+      })
+
+      if (!response.ok) {
+        const errorData = await response.json()
+        console.error("❌ API error getting conversation:", errorData)
+        return null
+      }
+
+      const { conversationId } = await response.json()
+      return conversationId
+    } catch (error) {
+      console.error("Error in getOrCreateConversation:", error)
+      return null
     }
   }
 }

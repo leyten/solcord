@@ -1,4 +1,5 @@
 "use client"
+import { usePrivy } from "@privy-io/react-auth"
 import { User, Trash2 } from "lucide-react"
 import type React from "react"
 
@@ -30,6 +31,7 @@ export function ServerList({
   onServersUpdate,
 }: ServerListProps) {
   const { profile } = useProfile()
+  const { getAccessToken } = usePrivy()
   const [isLeavingServer, setIsLeavingServer] = useState<string | null>(null)
   const [hoveredServer, setHoveredServer] = useState<string | null>(null)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState<Server | null>(null)
@@ -56,7 +58,9 @@ export function ServerList({
     setShowLeaveConfirm(null)
 
     try {
-      const result = await tokenServerService.leaveServer(profile.id, server.id)
+      const authToken = await getAccessToken()
+
+      const result = await tokenServerService.leaveServer(profile.id, server.id, authToken ?? undefined)
 
       if (result.success) {
         // If leaving the currently active server, switch to Solcord

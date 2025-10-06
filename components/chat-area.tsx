@@ -15,6 +15,7 @@ import { messagesService } from "@/lib/services/messages"
 import { useProfile } from "@/contexts/profile-context"
 import { tokenServerService } from "@/lib/services/token-servers"
 import { membersService } from "@/lib/services/members"
+import { usePrivy } from "@privy-io/react-auth"
 
 interface ChatAreaProps {
   server: Server
@@ -43,6 +44,7 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const { profile } = useProfile()
+  const { getAccessToken } = usePrivy()
 
   const checkPermissions = async () => {
     if (!profile?.id || !server?.id) {
@@ -177,7 +179,8 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
     if (confirm("Are you sure you want to delete this message?")) {
       setMessages((prev) => prev.filter((msg) => msg.id !== messageId))
 
-      const success = await messagesService.deleteMessage(messageId)
+      const authToken = await getAccessToken()
+      const success = await messagesService.deleteMessage(messageId, authToken ?? undefined)
       if (!success) {
         const result = await messagesService.getChannelMessages(channel.id, server.id)
         setMessages(result.messages)
@@ -199,7 +202,8 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
       ),
     )
 
-    const success = await messagesService.editMessage(messageId, newContent)
+    const authToken = await getAccessToken()
+    const success = await messagesService.editMessage(messageId, newContent, authToken ?? undefined)
     if (success) {
       setEditingMessage(null)
     } else {
@@ -434,6 +438,7 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
   const [attachedFiles, setAttachedFiles] = useState<File[]>([])
   const [uploadingFiles, setUploadingFiles] = useState<boolean>(false)
   const { profile } = useProfile()
+  const { getAccessToken } = usePrivy()
 
   useEffect(() => {
     const fetchMembers = async () => {
@@ -589,11 +594,18 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
         setUploadingFiles(false)
       }
 
-      const result = await messagesService.sendMessage(channel.id, server.id, profile.id, {
-        content: message.trim() || undefined,
-        attachments: attachments.length > 0 ? attachments : undefined,
-        reply_to: replyingTo?.id,
-      })
+      const authToken = await getAccessToken()
+      const result = await messagesService.sendMessage(
+        channel.id,
+        server.id,
+        profile.id,
+        {
+          content: message.trim() || undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
+          reply_to: replyingTo?.id,
+        },
+        authToken ?? undefined,
+      )
 
       if (result.success && result.message) {
         console.log("✅ Message sent successfully:", result.message.content)

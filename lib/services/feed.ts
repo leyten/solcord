@@ -44,12 +44,14 @@ export interface CreatePostData {
   content?: string
   attachments?: File[]
   userId?: string
+  authToken?: string // Added authToken for API authentication
 }
 
 export interface CreateCommentData {
   post_id: string
   content: string
   userId?: string
+  authToken?: string // Added authToken for API authentication
 }
 
 class FeedService {
@@ -183,9 +185,6 @@ class FeedService {
 
       console.log(`📝 Creating post for server: ${data.server_id}, channel: ${data.channel_id}`)
 
-      // Set user context for RLS
-      await this.setUserContext(userId)
-
       const attachments: any[] = []
 
       // Process attachments if provided
@@ -234,7 +233,7 @@ class FeedService {
 
       // Create optimistic post for immediate UI update
       const optimisticPost: FeedPost = {
-        id: `temp-${Date.now()}`, // Temporary ID
+        id: `temp-${Date.now()}`,
         channel_id: data.channel_id,
         server_id: data.server_id,
         author_id: userId,
@@ -247,7 +246,7 @@ class FeedService {
         updated_at: new Date().toISOString(),
         profiles: {
           id: userId,
-          username: "You", // Placeholder
+          username: "You",
           display_name: "You",
           avatar_url: null,
         },
@@ -260,17 +259,22 @@ class FeedService {
         onOptimisticUpdate(optimisticPost)
       }
 
-      // Create the post in database (async - real post will come via real-time)
-      const { error } = await this.supabase.from("feed_posts").insert({
-        channel_id: data.channel_id,
-        server_id: data.server_id,
-        author_id: userId,
-        content: data.content || null,
-        attachments: attachments,
+      const response = await fetch("/api/feed/create-post", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(data.authToken && { Authorization: `Bearer ${data.authToken}` }),
+        },
+        body: JSON.stringify({
+          channelId: data.channel_id,
+          serverId: data.server_id,
+          content: data.content || null,
+          attachments: attachments,
+        }),
       })
 
-      if (error) {
-        console.error("Error creating post:", error)
+      if (!response.ok) {
+        console.error("Error creating post via API")
         return null
       }
 
@@ -381,36 +385,24 @@ class FeedService {
         return null
       }
 
-      // Set user context for RLS
-      await this.setUserContext(userId)
-
-      const { data: comment, error } = await this.supabase
-        .from("feed_post_comments")
-        .insert({
-          post_id: data.post_id,
-          author_id: userId,
+      const response = await fetch("/api/feed/create-comment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(data.authToken && { Authorization: `Bearer ${data.authToken}` }),
+        },
+        body: JSON.stringify({
+          postId: data.post_id,
           content: data.content,
-        })
-        .select(`
-          *,
-          profiles:author_id (
-            id,
-            username,
-            name,
-            pfp_url
-          )
-        `)
-        .single()
+        }),
+      })
 
-      if (error) {
-        console.error("Error creating comment:", error)
+      if (!response.ok) {
+        console.error("Error creating comment via API")
         return null
       }
 
-      // Increment replies count
-      await this.supabase.rpc("increment_post_replies", {
-        post_id: data.post_id,
-      })
+      const { comment } = await response.json()
 
       return {
         ...comment,

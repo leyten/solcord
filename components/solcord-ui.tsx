@@ -17,6 +17,7 @@ import { dmService } from "@/lib/services/direct-messages"
 import { tokenServerService } from "@/lib/services/token-servers"
 import { channelsService } from "@/lib/services/channels"
 import { useProfile } from "@/contexts/profile-context"
+import { usePrivy } from "@privy-io/react-auth"
 
 function SolcordUIInner() {
   const [activeServer, setActiveServer] = useState<Server>(servers[0])
@@ -40,6 +41,7 @@ function SolcordUIInner() {
   const [userServers, setUserServers] = useState<any[]>([])
   const [allServers, setAllServers] = useState<Server[]>(servers)
   const { profile } = useProfile()
+  const { getAccessToken } = usePrivy()
 
   // Load channels for a specific server
   const loadServerChannels = useCallback(async (serverId: string) => {
@@ -90,20 +92,25 @@ function SolcordUIInner() {
   }, [profile?.id, loadServerChannels])
 
   // Refresh user balances
-  const refreshUserBalances = useCallback(async () => {
-    if (!profile?.id || !profile.primary_wallet) return
+  const refreshUserBalances = useCallback(
+    async (specificServerId?: string) => {
+      if (!profile?.id || !profile.primary_wallet) return
 
-    try {
-      console.log("[v0] Refreshing user token balances...")
-      await tokenServerService.updateUserMemberships(profile.id, profile.primary_wallet)
-      console.log("[v0] Token balances refreshed successfully")
+      try {
+        console.log("[v0] Refreshing user token balances...")
+        const authToken = await getAccessToken()
 
-      // Reload servers to reflect updated balances/roles
-      await loadUserServers()
-    } catch (error) {
-      console.error("[v0] Error refreshing token balances:", error)
-    }
-  }, [profile?.id, profile?.primary_wallet, loadUserServers])
+        await tokenServerService.updateUserMemberships(profile.id, profile.primary_wallet, specificServerId, authToken ?? undefined)
+        console.log("[v0] Token balances refreshed successfully")
+
+        // Reload servers to reflect updated balances/roles
+        await loadUserServers()
+      } catch (error) {
+        console.error("[v0] Error refreshing token balances:", error)
+      }
+    },
+    [profile?.id, profile?.primary_wallet, loadUserServers, getAccessToken],
+  )
 
   useEffect(() => {
     const initializeUserData = async () => {
@@ -115,6 +122,32 @@ function SolcordUIInner() {
 
     initializeUserData()
   }, [profile?.id, refreshUserBalances])
+
+  // Refresh user balances every 60 seconds
+  useEffect(() => {
+    if (!profile?.id || !profile.primary_wallet) return
+
+    // Initial refresh
+    refreshUserBalances()
+
+    // Set up 60-second interval
+    const intervalId = setInterval(() => {
+      console.log("[v0] Periodic balance refresh triggered")
+      refreshUserBalances()
+    }, 60000) // 60 seconds
+
+    return () => clearInterval(intervalId)
+  }, [profile?.id, profile?.primary_wallet, refreshUserBalances])
+
+  useEffect(() => {
+    if (!activeServer?.id || !profile?.id || !profile.primary_wallet) return
+
+    // Skip refresh for default Solcord server
+    if (activeServer.id === "solcord") return
+
+    console.log(`[v0] Server switched to ${activeServer.id}, refreshing balance...`)
+    refreshUserBalances(activeServer.id)
+  }, [activeServer?.id, profile?.id, profile?.primary_wallet, refreshUserBalances])
 
   // Update active channel when server changes
   useEffect(() => {

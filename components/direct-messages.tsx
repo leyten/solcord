@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { searchUsers } from "@/app/actions"
 import { useProfile } from "@/contexts/profile-context"
 import { dmService, type DMMessage, type DMConversation } from "@/lib/services/direct-messages"
+import { usePrivy } from "@privy-io/react-auth"
 
 interface DirectMessagesProps {
   onClose: () => void
@@ -42,6 +43,8 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
 
   // Use ref to track active conversation for callbacks without causing re-subscriptions
   const activeConversationRef = useRef<string | null>(null)
+
+  const { getAccessToken } = usePrivy()
 
   useEffect(() => {
     activeConversationRef.current = activeConversation
@@ -215,15 +218,15 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
     const loadMessages = async () => {
       setIsLoadingMessages(true)
       try {
-        const msgs = await dmService.getConversationMessages(profile.id, activeConversation)
+        const authToken = await getAccessToken()
+        const msgs = await dmService.getConversationMessages(profile.id, activeConversation, 50, authToken ?? undefined)
 
         setMessages((prev) => ({
           ...prev,
           [activeConversation]: msgs,
         }))
 
-        // Mark messages as read
-        await dmService.markMessagesAsRead(profile.id, activeConversation)
+        await dmService.markMessagesAsRead(profile.id, activeConversation, authToken ?? undefined)
 
         // Update the conversation's unread count locally
         setConversations((prev) =>
@@ -241,7 +244,7 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
     }
 
     loadMessages()
-  }, [activeConversation, profile?.id, scrollToBottom])
+  }, [activeConversation, profile?.id, scrollToBottom, getAccessToken])
 
   // Auto-scroll to bottom when messages change - but only for new messages in active conversation
   useEffect(() => {
@@ -359,12 +362,14 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
         scrollToBottom()
       }, 10)
 
+      const authToken = await getAccessToken()
       const result = await dmService.sendMessage(
         profile.id,
         activeConversation,
         messageText,
         uploadedAttachments,
         optimisticId,
+        authToken ?? undefined,
       )
 
       if (!result.success) {
@@ -451,12 +456,28 @@ export function DirectMessages({ onClose, onNotificationUpdate, initialConversat
       return
     }
 
+    const tempConversation: DMConversation = {
+      id: `temp_${user.id}`,
+      other_user_id: user.id,
+      other_user_name: user.name,
+      other_user_username: user.username,
+      other_user_pfp_url: user.pfp_url || "", // Default to empty string
+      other_user_status: user.status || "offline", // Default to offline
+      last_message: "", // Empty string instead of null
+      last_message_at: new Date().toISOString(), // Current timestamp instead of null
+      unread_count: 0,
+      created_at: new Date().toISOString(),
+    }
+
+    // Add temporary conversation to the list
+    setConversations((prev) => [tempConversation, ...prev])
+
     // Start new conversation by setting active conversation
     setActiveConversation(user.id)
     setShowNewConversation(false)
     setNewConversationSearch("")
 
-    // The conversation will be created when the first message is sent
+    // The conversation will be created in the database when the first message is sent
   }
 
   const getStatusColor = (status?: string) => {

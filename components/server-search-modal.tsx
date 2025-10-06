@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { tokenServerService } from "@/lib/services/token-servers"
 import { solanaTracker } from "@/lib/services/solana-tracker"
 import { useProfile } from "@/contexts/profile-context"
+import { usePrivy } from "@privy-io/react-auth"
 
 interface ServerSearchModalProps {
   onClose: () => void
@@ -35,6 +36,7 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
   const [isJoining, setIsJoining] = useState(false)
   const [error, setError] = useState("")
   const { profile } = useProfile()
+  const { getAccessToken } = usePrivy()
 
   const handleSearch = async () => {
     if (!tokenCA.trim()) return
@@ -111,7 +113,10 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
     setError("")
 
     try {
-      const result = await tokenServerService.joinServer(tokenCA.trim(), profile.id, profile.primary_wallet)
+      const authToken = await getAccessToken()
+      console.log("[v0] Auth token retrieved:", authToken ? "Token present" : "No token")
+
+      const result = await tokenServerService.joinServer(tokenCA.trim(), profile.id, profile.primary_wallet, authToken ?? undefined)
 
       if (result.success) {
         // Success - close modal and potentially refresh servers
