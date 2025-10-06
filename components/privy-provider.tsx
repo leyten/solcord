@@ -22,9 +22,11 @@ export function PrivyProvider({ children }: { children: React.ReactNode }) {
         },
         appearance: {
           theme: "dark",
+          showWalletLoginFirst: true, 
           accentColor: "#FFFFFF",
         },
         // Only allow wallet connections for Solana-native experience
+        
         loginMethods: ["wallet"],
         legal: {
           termsAndConditionsUrl: "",
