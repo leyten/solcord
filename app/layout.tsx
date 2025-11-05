@@ -15,6 +15,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
+      <head>
+        <meta name="devfun-verification"></meta>
+      </head>
       <body>
         <PrivyProvider>{children}</PrivyProvider>
       </body>
