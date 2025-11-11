@@ -442,7 +442,6 @@ export class OptimizedMessagesService {
     return spamPreventionService.getCooldownRemaining(userId)
   }
 
-  // REAL-TIME SUBSCRIPTION - BACK TO SIMPLE VERSION THAT WORKED
   subscribeToChannel(
     channelId: string,
     serverId: string,
@@ -465,20 +464,25 @@ export class OptimizedMessagesService {
     }
 
 
-    // Create a completely fresh subscription
-    const channelName = `realtime_messages_${serverId}_${channelId}_${Math.random().toString(36).substring(7)}`
+    const channelName = `realtime_messages_${channelId}_${Math.random().toString(36).substring(7)}`
 
     const subscription = this.supabase
       .channel(channelName)
       .on(
         "postgres_changes",
         {
-          event: "*", // Listen to all events
+          event: "*",
           schema: "public",
           table: "messages",
-          filter: `server_id=eq.${serverId}.and.channel_id=eq.${channelId}`, // 🔥 FILTER BY BOTH
+          filter: `channel_id=eq.${channelId}`,
         },
         async (payload) => {
+          console.log(`🔥 REAL-TIME EVENT RECEIVED for channel ${channelId}:`, payload.eventType, payload)
+
+          const msg = payload.new || payload.old
+          if (msg && msg.server_id !== serverId) {
+            return
+          }
 
           if (payload.eventType === "INSERT" && callbacks.onInsert) {
             const msg = payload.new
