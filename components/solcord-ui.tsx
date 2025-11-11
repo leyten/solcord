@@ -96,7 +96,7 @@ function SolcordUIInner() {
       try {
         const authToken = await getAccessToken()
 
-        await tokenServerService.updateUserMemberships(profile.id, profile.primary_wallet, specificServerId, authToken)
+        await tokenServerService.updateUserMemberships(profile.id, profile.primary_wallet, specificServerId, authToken ?? undefined)
 
         // Reload servers to reflect updated balances/roles
         await loadUserServers()
