@@ -43,6 +43,40 @@ function SolcordUIInner() {
   const { profile } = useProfile()
   const { getAccessToken } = usePrivy()
 
+  useEffect(() => {
+    if (!profile?.id) return
+
+    const savedOrder = localStorage.getItem(`server-order-${profile.id}`)
+    if (savedOrder) {
+      try {
+        const orderIds = JSON.parse(savedOrder) as string[]
+        // Reorder allServers based on saved order
+        const orderedServers = orderIds
+          .map((id) => allServers.find((s) => s.id === id))
+          .filter((s) => s !== undefined) as Server[]
+
+        // Add any servers that aren't in the saved order (newly joined servers)
+        const newServers = allServers.filter((s) => !orderIds.includes(s.id))
+        setAllServers([...orderedServers, ...newServers])
+      } catch (error) {
+        console.error("Failed to load server order:", error)
+      }
+    }
+  }, [profile?.id])
+
+  const handleReorderServers = useCallback(
+    (newOrder: Server[]) => {
+      setAllServers(newOrder)
+
+      // Save order to localStorage
+      if (profile?.id) {
+        const orderIds = newOrder.map((s) => s.id)
+        localStorage.setItem(`server-order-${profile.id}`, JSON.stringify(orderIds))
+      }
+    },
+    [profile?.id],
+  )
+
   // Load channels for a specific server
   const loadServerChannels = useCallback(async (serverId: string) => {
     try {
@@ -75,12 +109,21 @@ function SolcordUIInner() {
         token_ca: tokenServer.token_ca,
       }))
 
-      // Combine default servers with user's token servers
-      const combinedServers = [...servers, ...tokenServerObjects]
-      setAllServers(combinedServers)
+      setAllServers((prevServers) => {
+        const existingServerIds = new Set(prevServers.map((s) => s.id))
+        const newServers = tokenServerObjects.filter((s) => !existingServerIds.has(s.id))
+
+        // Update existing servers (in case name/logo changed) and add new ones
+        const updatedServers = prevServers.map((existingServer) => {
+          const updatedTokenServer = tokenServerObjects.find((ts) => ts.id === existingServer.id)
+          return updatedTokenServer || existingServer
+        })
+
+        return [...updatedServers, ...newServers]
+      })
 
       // Load channels for all servers (including token servers)
-      for (const server of combinedServers) {
+      for (const server of [...servers, ...tokenServerObjects]) {
         await loadServerChannels(server.id)
       }
     } catch (error) {
@@ -101,6 +144,7 @@ function SolcordUIInner() {
         // Reload servers to reflect updated balances/roles
         await loadUserServers()
       } catch (error) {
+        console.error("[v0] Error refreshing token balances:", error)
       }
     },
     [profile?.id, profile?.primary_wallet, loadUserServers, getAccessToken],
@@ -370,6 +414,7 @@ function SolcordUIInner() {
         onAddServer={handleOpenServerSearch}
         unreadDMCount={unreadDMCount}
         onServersUpdate={loadUserServers}
+        onReorderServers={handleReorderServers}
       />
       <ChannelSidebar
         server={activeServer}

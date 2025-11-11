@@ -196,7 +196,6 @@ export class TokenServerService {
 
   async getUserHoldingPercentage(userId: string, serverId: string): Promise<number> {
     try {
-
       // Get the membership with token_balance
       const { data: membership, error: membershipError } = await this.supabase
         .from("server_memberships")
@@ -205,18 +204,16 @@ export class TokenServerService {
         .eq("server_id", serverId)
         .maybeSingle()
 
-
       if (membershipError || !membership) {
+        console.error("Error fetching user membership:", membershipError)
         return 0
       }
 
       const decimals = 6 // Standard for most Solana tokens
       const tokenBalanceRaw = membership.token_balance || 0
 
-
       // Calculate percentage from raw balance
       const percentage = this.calculateHoldingPercentage(tokenBalanceRaw, decimals)
-
       return percentage
     } catch (error) {
       console.error("Error in getUserHoldingPercentage:", error)
@@ -288,7 +285,6 @@ export class TokenServerService {
 
   async getUserTokenPercentage(serverId: string): Promise<number> {
     try {
-
       if (!this.supabase.auth.getUser) {
         return 0
       }
@@ -296,7 +292,6 @@ export class TokenServerService {
       const {
         data: { user },
       } = await this.supabase.auth.getUser()
-
 
       if (!user) {
         return 0
@@ -309,18 +304,16 @@ export class TokenServerService {
         .eq("server_id", serverId)
         .maybeSingle()
 
-
       if (error || !membership) {
         return 0
       }
 
+      const decimals = 6 // Standard for most Solana tokens
       const tokenBalanceRaw = membership.token_balance || 0
-      const minimumFor1Percent = 10_000_000_000_000 // 10 trillion raw units = 10M tokens = 1%
 
-
-
-      // Return 1.0 if user has 1%+ tokens, 0 otherwise
-      return tokenBalanceRaw >= minimumFor1Percent ? 1.0 : 0
+      // Calculate actual percentage using the same logic as getUserHoldingPercentage
+      const percentage = this.calculateHoldingPercentage(tokenBalanceRaw, decimals)
+      return percentage
     } catch (error) {
       console.error("Error in getUserTokenPercentage:", error)
       return 0

@@ -58,7 +58,7 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
     try {
       const [hasWritePermission, tokenPercentage] = await Promise.all([
         tokenServerService.canUserWrite(profile.id, server.id),
-        tokenServerService.getUserTokenPercentage(server.id),
+        tokenServerService.getUserHoldingPercentage(profile.id, server.id),
       ])
 
       setCanWrite(hasWritePermission)
@@ -82,7 +82,6 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
 
   useEffect(() => {
     if (!channel?.id || !server?.id || !canAccessChannel) return
-
 
     const loadMessages = async () => {
       setIsLoading(true)
@@ -303,7 +302,7 @@ export function ChatArea({ server, channel, users, onOpenSettings }: ChatAreaPro
               const showAvatar =
                 !prevMessage ||
                 prevMessage.author_id !== message.author_id ||
-                new Date(message.created_at).getTime() - new Date(prevMessage.created_at).getTime() > 300000 // 5 minutes
+                new Date(message.created_at).getTime() - new Date(prevMessage.created_at).getTime() > 300000
 
               return (
                 <MessageItem
@@ -563,7 +562,6 @@ function ChatInput({ server, channel, replyingTo, canWrite, isCheckingPermission
       !canWrite
     )
       return
-
 
     setIsSending(true)
     setSpamError(null)

@@ -18,6 +18,7 @@ interface ServerListProps {
   onAddServer: () => void
   unreadDMCount?: number
   onServersUpdate?: () => void
+  onReorderServers?: (servers: Server[]) => void
 }
 
 export function ServerList({
@@ -29,12 +30,15 @@ export function ServerList({
   onAddServer,
   unreadDMCount = 0,
   onServersUpdate,
+  onReorderServers,
 }: ServerListProps) {
   const { profile } = useProfile()
   const { getAccessToken } = usePrivy()
   const [isLeavingServer, setIsLeavingServer] = useState<string | null>(null)
   const [hoveredServer, setHoveredServer] = useState<string | null>(null)
   const [showLeaveConfirm, setShowLeaveConfirm] = useState<Server | null>(null)
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
 
   const handleServerClick = (server: Server) => {
     setActiveServer(server)
@@ -86,6 +90,49 @@ export function ServerList({
     }
   }
 
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+    setDraggedIndex(index)
+    e.dataTransfer.effectAllowed = "move"
+    e.dataTransfer.setData("text/html", e.currentTarget.innerHTML)
+  }
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = "move"
+    setDragOverIndex(index)
+  }
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null)
+  }
+
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault()
+
+    if (draggedIndex === null || draggedIndex === dropIndex) {
+      setDraggedIndex(null)
+      setDragOverIndex(null)
+      return
+    }
+
+    const newServers = [...servers]
+    const draggedServer = newServers[draggedIndex]
+    newServers.splice(draggedIndex, 1)
+    newServers.splice(dropIndex, 0, draggedServer)
+
+    if (onReorderServers) {
+      onReorderServers(newServers)
+    }
+
+    setDraggedIndex(null)
+    setDragOverIndex(null)
+  }
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null)
+    setDragOverIndex(null)
+  }
+
   return (
     <>
       <div className="w-16 bg-neutral-900 border-r border-neutral-800 flex flex-col items-center py-4">
@@ -118,7 +165,7 @@ export function ServerList({
 
         {/* Servers */}
         <div className="flex flex-col space-y-3 mb-6">
-          {servers.map((server) => (
+          {servers.map((server, index) => (
             <TooltipProvider key={server.id}>
               <Tooltip delayDuration={300}>
                 <TooltipTrigger asChild>
@@ -126,21 +173,29 @@ export function ServerList({
                     className="relative"
                     onMouseEnter={() => setHoveredServer(server.id)}
                     onMouseLeave={() => setHoveredServer(null)}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, index)}
+                    onDragOver={(e) => handleDragOver(e, index)}
+                    onDragLeave={handleDragLeave}
+                    onDrop={(e) => handleDrop(e, index)}
+                    onDragEnd={handleDragEnd}
                   >
                     <button
                       onClick={() => handleServerClick(server)}
-                      className={`w-10 h-10 rounded-none flex items-center justify-center text-xs font-bold transition-colors overflow-hidden ${
+                      className={`w-10 h-10 rounded-none flex items-center justify-center text-xs font-bold transition-colors overflow-hidden cursor-grab active:cursor-grabbing ${
                         activeServer.id === server.id
                           ? "bg-neutral-100 text-neutral-900"
                           : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
-                      } ${isLeavingServer === server.id ? "opacity-50" : ""}`}
+                      } ${isLeavingServer === server.id ? "opacity-50" : ""} ${
+                        dragOverIndex === index && draggedIndex !== index ? "border-2 border-blue-500" : ""
+                      } ${draggedIndex === index ? "opacity-50" : ""}`}
                       disabled={isLeavingServer === server.id}
                     >
                       {server.logo ? (
                         <img
                           src={server.logo || "/placeholder.svg"}
                           alt={server.name}
-                          className="w-full h-full object-cover"
+                          className="w-full h-full object-cover pointer-events-none"
                           onError={(e) => {
                             // Fallback to first letter if image fails to load
                             const target = e.target as HTMLImageElement
