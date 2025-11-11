@@ -258,6 +258,7 @@ export function Feed({ server, channel }: FeedProps) {
       target.closest("input") ||
       target.closest("textarea") ||
       target.tagName === "IMG" ||
+      target.tagName === "VIDEO" ||
       target.closest(".profile-clickable")
     ) {
       return
@@ -601,6 +602,11 @@ export function Feed({ server, channel }: FeedProps) {
                                   window.open(url, "_blank")
                                 }}
                               />
+                              ) : contentType.startsWith("video/") ? (
+                                <video controls className="rounded-none max-h-96 max-w-sm" preload="metadata">
+                                  <source src={url} type={contentType} />
+                                  Your browser does not support the video tag.
+                              </video>
                             ) : (
                               <div className="flex items-center space-x-2 bg-neutral-800 border border-neutral-700 p-2 max-w-sm">
                                 <Paperclip className="w-4 h-4 text-neutral-400" />

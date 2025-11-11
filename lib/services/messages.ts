@@ -479,7 +479,7 @@ export class OptimizedMessagesService {
         async (payload) => {
           console.log(`🔥 REAL-TIME EVENT RECEIVED for channel ${channelId}:`, payload.eventType, payload)
 
-          const msg = payload.new || payload.old
+          const msg = (payload.new || payload.old) as any
           if (msg && msg.server_id !== serverId) {
             return
           }
