@@ -96,12 +96,11 @@ function SolcordUIInner() {
       try {
         const authToken = await getAccessToken()
 
-        await tokenServerService.updateUserMemberships(profile.id, profile.primary_wallet, specificServerId, authToken ?? undefined)
+        await tokenServerService.updateUserMemberships(profile.id, profile.primary_wallet, specificServerId, authToken)
 
         // Reload servers to reflect updated balances/roles
         await loadUserServers()
       } catch (error) {
-        console.error("Error refreshing token balances:", error)
       }
     },
     [profile?.id, profile?.primary_wallet, loadUserServers, getAccessToken],
@@ -142,18 +141,26 @@ function SolcordUIInner() {
     refreshUserBalances(activeServer.id)
   }, [activeServer?.id, profile?.id, profile?.primary_wallet, refreshUserBalances])
 
-  // Update active channel when server changes
   useEffect(() => {
-    if (activeServer?.id) {
-      const serverChannels = dynamicChannelsByServer[activeServer.id]
-      if (serverChannels && serverChannels.length > 0 && serverChannels[0].channels.length > 0) {
-        setActiveChannel(serverChannels[0].channels[0])
-      } else {
-        // Load channels for this server if not loaded yet
-        loadServerChannels(activeServer.id)
-      }
+    if (!activeServer?.id) return
+
+    const serverChannels = dynamicChannelsByServer[activeServer.id]
+
+    // If channels don't exist yet, load them but DON'T switch the active channel
+    if (!serverChannels || serverChannels.length === 0) {
+      loadServerChannels(activeServer.id)
+      return
     }
-  }, [activeServer, dynamicChannelsByServer, loadServerChannels])
+
+    // Only auto-switch to first channel if current channel doesn't belong to this server
+    // This prevents unwanted switches when channels are dynamically loaded
+    const allChannelsInServer = serverChannels.flatMap((section) => section.channels)
+    const currentChannelExistsInServer = allChannelsInServer.some((ch) => ch.id === activeChannel.id)
+
+    if (!currentChannelExistsInServer && serverChannels.length > 0 && serverChannels[0].channels.length > 0) {
+      setActiveChannel(serverChannels[0].channels[0])
+    }
+  }, [activeServer.id])
 
   // Load members when server changes (not channel)
   useEffect(() => {
