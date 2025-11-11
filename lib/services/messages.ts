@@ -454,9 +454,14 @@ export class OptimizedMessagesService {
   ) {
     const subscriptionKey = `${serverId}-${channelId}`
 
-    // Clean up existing subscription
     if (this.subscriptions.has(subscriptionKey)) {
-      this.subscriptions.get(subscriptionKey).unsubscribe()
+      const existingSub = this.subscriptions.get(subscriptionKey)
+      try {
+        existingSub.unsubscribe()
+      } catch (error) {
+        console.error("Error cleaning up existing subscription:", error)
+      }
+      this.subscriptions.delete(subscriptionKey)
     }
 
 
@@ -594,20 +599,26 @@ export class OptimizedMessagesService {
     return subscription
   }
 
-  // Clean up subscriptions - NOW SERVER-AWARE
   unsubscribeFromChannel(channelId: string, serverId: string) {
     const subscriptionKey = `${serverId}-${channelId}`
     const subscription = this.subscriptions.get(subscriptionKey)
     if (subscription) {
-      subscription.unsubscribe()
+      try {
+        subscription.unsubscribe()
+      } catch (error) {
+        console.error(`Error unsubscribing from ${subscriptionKey}:`, error)
+      }
       this.subscriptions.delete(subscriptionKey)
     }
   }
 
-  // Clean up all subscriptions
   cleanup() {
     this.subscriptions.forEach((subscription, key) => {
-      subscription.unsubscribe()
+      try {
+        subscription.unsubscribe()
+      } catch (error) {
+        console.error(`Error unsubscribing from ${key}:`, error)
+      }
     })
     this.subscriptions.clear()
     this.messageCache.clear()

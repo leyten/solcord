@@ -203,12 +203,12 @@ class MembersService {
       ACTIVE_HEARTBEAT = null
     }
 
-    // Kill subscription
     if (ACTIVE_SUBSCRIPTION) {
       try {
-        supabase.removeChannel(ACTIVE_SUBSCRIPTION)
+        // Use unsubscribe() which is the proper way to clean up Supabase realtime
+        ACTIVE_SUBSCRIPTION.unsubscribe()
       } catch (error) {
-        console.error("Error removing subscription:", error)
+        console.error("Error unsubscribing:", error)
       }
       ACTIVE_SUBSCRIPTION = null
     }

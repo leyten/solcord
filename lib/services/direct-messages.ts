@@ -362,14 +362,21 @@ export class DirectMessagesService {
     return this.messageSubscription
   }
 
-  // Clean up subscriptions
   cleanup() {
     if (this.messageSubscription) {
-      this.messageSubscription.unsubscribe()
+      try {
+        this.messageSubscription.unsubscribe()
+      } catch (error) {
+        console.error("Error cleaning up message subscription:", error)
+      }
       this.messageSubscription = null
     }
     if (this.conversationSubscription) {
-      this.conversationSubscription.unsubscribe()
+      try {
+        this.conversationSubscription.unsubscribe()
+      } catch (error) {
+        console.error("Error cleaning up conversation subscription:", error)
+      }
       this.conversationSubscription = null
     }
   }
