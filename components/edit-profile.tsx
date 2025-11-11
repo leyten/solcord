@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useActionState, useRef, useCallback } from "react"
-import { X, Plus, Trash2, Check, AlertCircle, Loader2, Wallet, LogOut } from "lucide-react"
+import { X, Plus, Trash2, Check, AlertCircle, Loader2, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -108,7 +108,6 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
   const [newConnection, setNewConnection] = useState({ platform: "", value: "" })
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [hasChanges, setHasChanges] = useState(false)
-  const [isChangingWallet, setIsChangingWallet] = useState(false)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
   const [isLoggingOut, setIsLoggingOut] = useState(false)
 
@@ -270,34 +269,15 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
     }
   }, [isEmbedded, hasChanges])
 
-  const handleChangeWallet = async () => {
-    try {
-      setIsChangingWallet(true)
-
-      // If there's already a wallet connected, unlink it first
-      if (currentWallet && currentWallet.type === "wallet") {
-        await unlinkWallet(currentWallet.address)
-      }
-
-      // Then link the new wallet
-      await linkWallet()
-
-      // After linking, refresh profile to get updated wallet info
-      await refreshProfile()
-    } catch (error) {
-      console.error("Failed to change wallet:", error)
-    } finally {
-      setIsChangingWallet(false)
-    }
-  }
-
   const handleLogout = async () => {
     try {
       setIsLoggingOut(true)
 
       // Set status to offline before logging out
+      console.log("🔄 Setting status to offline before logout")
       try {
         await updateUserStatus("offline")
+        console.log("✅ Successfully set status to offline before logout")
       } catch (error) {
         console.error("❌ Failed to set status to offline before logout:", error)
         // Continue with logout even if status update fails
@@ -517,7 +497,6 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
 
           {/* Right Column */}
           <div className="space-y-6">
-            {/* Connected Wallet */}
             <div>
               <label className="block text-sm font-medium text-neutral-300 mb-3">Connected Wallet</label>
               <div className="bg-neutral-800 border border-neutral-700 p-3 rounded-none">
@@ -541,29 +520,6 @@ export function EditProfile({ onClose, isEmbedded = false, onSave, onHasChanges 
                       </div>
                     )}
                   </div>
-                </div>
-
-                {/* Wallet Actions */}
-                <div className="mt-3">
-                  <Button
-                    type="button"
-                    onClick={handleChangeWallet}
-                    disabled={isChangingWallet}
-                    size="sm"
-                    className="bg-white text-black hover:bg-neutral-200 h-7 px-3 text-xs rounded-none disabled:bg-neutral-700 disabled:text-neutral-500"
-                  >
-                    {isChangingWallet ? (
-                      <>
-                        <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                        Connecting...
-                      </>
-                    ) : (
-                      <>
-                        <Wallet className="w-3 h-3 mr-1" />
-                        {currentWallet ? "Change Wallet" : "Connect Wallet"}
-                      </>
-                    )}
-                  </Button>
                 </div>
               </div>
             </div>

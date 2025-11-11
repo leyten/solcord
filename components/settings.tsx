@@ -3,8 +3,7 @@
 import type React from "react"
 
 import { useState, useRef, useEffect } from "react"
-import { X, Volume2, Bell, Shield, Palette, HelpCircle, User } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { X, Bell, User } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { EditProfile } from "@/components/edit-profile"
 
@@ -88,11 +87,7 @@ export function Settings({ onClose }: SettingsProps) {
 
   const tabs = [
     { id: "profile", label: "Edit Profile", icon: User },
-    { id: "audio", label: "Audio", icon: Volume2 },
     { id: "notifications", label: "Notifications", icon: Bell },
-    { id: "privacy", label: "Privacy", icon: Shield },
-    { id: "appearance", label: "Appearance", icon: Palette },
-    { id: "advanced", label: "Advanced", icon: HelpCircle },
   ]
 
   const handleSave = () => {
@@ -103,6 +98,7 @@ export function Settings({ onClose }: SettingsProps) {
       }
     } else {
       // Handle other settings saves here
+      console.log("Saving other settings...")
       onClose()
     }
   }
@@ -129,79 +125,6 @@ export function Settings({ onClose }: SettingsProps) {
               onSave={handleProfileSave}
               onHasChanges={setProfileHasChanges}
             />
-          </div>
-        )
-
-      case "audio":
-        return (
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-3">Master Volume</label>
-              <CustomSlider value={masterVolume} onValueChange={setMasterVolume} max={100} step={1} />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-3">Microphone Volume</label>
-              <CustomSlider value={micVolume} onValueChange={setMicVolume} max={100} step={1} />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">Input Device</label>
-              <Select defaultValue="default">
-                <SelectTrigger className="bg-neutral-800 border-neutral-700 text-neutral-100 rounded-none">
-                  <SelectValue placeholder="Select microphone" />
-                </SelectTrigger>
-                <SelectContent className="bg-neutral-800 border-neutral-700 rounded-none text-white">
-                  <SelectItem
-                    value="default"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Default - Built-in Microphone
-                  </SelectItem>
-                  <SelectItem
-                    value="usb"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    USB Headset Microphone
-                  </SelectItem>
-                  <SelectItem
-                    value="bluetooth"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Bluetooth Headphones
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">Output Device</label>
-              <Select defaultValue="default">
-                <SelectTrigger className="bg-neutral-800 border-neutral-700 text-neutral-100 rounded-none">
-                  <SelectValue placeholder="Select speakers" />
-                </SelectTrigger>
-                <SelectContent className="bg-neutral-800 border-neutral-700 rounded-none text-white">
-                  <SelectItem
-                    value="default"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Default - Built-in Speakers
-                  </SelectItem>
-                  <SelectItem
-                    value="usb"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    USB Headset
-                  </SelectItem>
-                  <SelectItem
-                    value="bluetooth"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Bluetooth Headphones
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
         )
 
@@ -302,165 +225,6 @@ export function Settings({ onClose }: SettingsProps) {
           </div>
         )
 
-      case "privacy":
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-neutral-300">Show Online Status</label>
-                <p className="text-xs text-neutral-500">Let others see when you're online</p>
-              </div>
-              <button className={`w-12 h-6 border border-neutral-600 transition-colors bg-green-500`}>
-                <div className={`w-[19px] h-[19px] bg-white transition-transform translate-x-6`} />
-              </button>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-neutral-300">Allow Direct Messages</label>
-                <p className="text-xs text-neutral-500">Receive DMs from other users</p>
-              </div>
-              <button className={`w-12 h-6 border border-neutral-600 transition-colors bg-green-500`}>
-                <div className={`w-[19px] h-[19px] bg-white transition-transform translate-x-6`} />
-              </button>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">Who can add you as friend</label>
-              <Select defaultValue="everyone">
-                <SelectTrigger className="bg-neutral-800 border-neutral-700 text-neutral-100 rounded-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-neutral-800 border-neutral-700 rounded-none text-white">
-                  <SelectItem
-                    value="everyone"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Everyone
-                  </SelectItem>
-                  <SelectItem
-                    value="friends"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Friends of friends
-                  </SelectItem>
-                  <SelectItem
-                    value="none"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    No one
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-        )
-
-      case "appearance":
-        return (
-          <div className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">Theme</label>
-              <Select defaultValue="dark">
-                <SelectTrigger className="bg-neutral-800 border-neutral-700 text-neutral-100 rounded-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-neutral-800 border-neutral-700 rounded-none text-white">
-                  <SelectItem
-                    value="dark"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Dark
-                  </SelectItem>
-                  <SelectItem
-                    value="light"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Light
-                  </SelectItem>
-                  <SelectItem
-                    value="auto"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Auto
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">Message Display</label>
-              <Select defaultValue="cozy">
-                <SelectTrigger className="bg-neutral-800 border-neutral-700 text-neutral-100 rounded-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-neutral-800 border-neutral-700 rounded-none text-white">
-                  <SelectItem
-                    value="cozy"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Cozy
-                  </SelectItem>
-                  <SelectItem
-                    value="compact"
-                    className="text-white hover:text-black hover:bg-white focus:text-black focus:bg-white"
-                  >
-                    Compact
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-neutral-300">Show Timestamps</label>
-                <p className="text-xs text-neutral-500">Display message timestamps</p>
-              </div>
-              <button className={`w-12 h-6 border border-neutral-600 transition-colors bg-green-500`}>
-                <div className={`w-[19px] h-[19px] bg-white transition-transform translate-x-6`} />
-              </button>
-            </div>
-          </div>
-        )
-
-      case "advanced":
-        return (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-sm font-medium text-neutral-300">Hardware Acceleration</label>
-                <p className="text-xs text-neutral-500">Use GPU for better performance</p>
-              </div>
-              <button className={`w-12 h-6 border border-neutral-600 transition-colors bg-green-500`}>
-                <div className={`w-[19px] h-[19px] bg-white transition-transform translate-x-6`} />
-              </button>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-neutral-300 mb-2">Cache Size</label>
-              <div className="flex items-center justify-between text-sm text-neutral-400">
-                <span>Current cache: 245 MB</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="border-neutral-600 text-neutral-200 bg-transparent rounded-none h-8"
-                >
-                  Clear Cache
-                </Button>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-neutral-800">
-              <Button
-                variant="outline"
-                className="w-full border-neutral-600 text-neutral-400 bg-transparent hover:bg-neutral-800 rounded-none"
-              >
-                Reset All Settings
-              </Button>
-            </div>
-          </div>
-        )
-
       default:
         return null
     }
@@ -468,8 +232,8 @@ export function Settings({ onClose }: SettingsProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Number keys 1-6 to switch tabs
-      if (e.key >= "1" && e.key <= "6") {
+      // Number keys 1-2 to switch tabs
+      if (e.key >= "1" && e.key <= "2") {
         const tabIndex = Number.parseInt(e.key) - 1
         if (tabIndex < tabs.length) {
           setActiveTab(tabs[tabIndex].id)

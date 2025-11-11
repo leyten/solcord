@@ -144,7 +144,6 @@ function SolcordUIInner() {
         // Reload servers to reflect updated balances/roles
         await loadUserServers()
       } catch (error) {
-        console.error("[v0] Error refreshing token balances:", error)
       }
     },
     [profile?.id, profile?.primary_wallet, loadUserServers, getAccessToken],
