@@ -18,7 +18,6 @@ const statusColors = {
 }
 
 export function UserList({ users, collapsed, onToggleCollapse, title = "Members", onUserClick }: UserListProps) {
-  // Separate users by status - DND users are considered "online" for grouping but with different activity
   const onlineUsers = users.filter((user) => user.status === "online")
   const dndUsers = users.filter((user) => user.status === "dnd")
   const offlineUsers = users.filter((user) => user.status === "offline")
@@ -34,7 +33,6 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
   if (collapsed) {
     return (
       <div className="w-12 bg-neutral-925 border-l border-neutral-800 flex flex-col">
-        {/* Expand Button */}
         <div className="h-12 flex items-center justify-center border-b border-neutral-800 bg-neutral-900">
           <button
             onClick={onToggleCollapse}
@@ -44,8 +42,7 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
           </button>
         </div>
 
-        {/* Online + DND User Profile Pictures */}
-        <div className="flex-1 overflow-y-auto py-2 flex flex-col items-center space-y-2">
+        <div className="flex-1 overflow-y-auto py-2 flex flex-col items-center space-y-2 scrollbar-hide">
           {activeUsers.map((user) => (
             <button
               key={user.id}
@@ -70,13 +67,22 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
             </button>
           ))}
         </div>
+
+        <style jsx>{`
+          .scrollbar-hide {
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+          }
+          .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+          }
+        `}</style>
       </div>
     )
   }
 
   return (
     <div className="w-60 bg-neutral-925 border-l border-neutral-800 flex flex-col">
-      {/* Header */}
       <div className="h-12 px-4 flex items-center justify-between border-b border-neutral-800 bg-neutral-900">
         <div className="flex items-center">
           <span className="text-sm font-semibold text-neutral-100">{title}</span>
@@ -90,9 +96,7 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
         </button>
       </div>
 
-      {/* User List */}
-      <div className="flex-1 overflow-y-auto py-2">
-        {/* Online Users (includes DND) */}
+      <div className="flex-1 overflow-y-auto py-2 scrollbar-hide">
         {activeUsers.length > 0 && (
           <div className="mb-4">
             <div className="px-4 py-1">
@@ -136,7 +140,6 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
           </div>
         )}
 
-        {/* Offline Users */}
         {offlineUsers.length > 0 && (
           <div>
             <div className="px-4 py-1">
@@ -176,7 +179,6 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
           </div>
         )}
 
-        {/* Empty State */}
         {activeUsers.length === 0 && offlineUsers.length === 0 && (
           <div className="flex-1 flex items-center justify-center text-center text-neutral-500 py-8">
             <div>
@@ -185,6 +187,16 @@ export function UserList({ users, collapsed, onToggleCollapse, title = "Members"
           </div>
         )}
       </div>
+
+      <style jsx>{`
+        .scrollbar-hide {
+          scrollbar-width: none;
+          -ms-overflow-style: none;
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+          display: none;
+        }
+      `}</style>
     </div>
   )
 }
