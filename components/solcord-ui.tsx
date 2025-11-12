@@ -77,6 +77,27 @@ function SolcordUIInner() {
     [profile?.id],
   )
 
+  const handleServerRemoved = useCallback(
+    (serverId: string) => {
+      setAllServers((prev) => prev.filter((s) => s.id !== serverId))
+
+      // Clean up server order in localStorage
+      if (profile?.id) {
+        const savedOrder = localStorage.getItem(`server-order-${profile.id}`)
+        if (savedOrder) {
+          try {
+            const orderIds = JSON.parse(savedOrder) as string[]
+            const newOrderIds = orderIds.filter((id) => id !== serverId)
+            localStorage.setItem(`server-order-${profile.id}`, JSON.stringify(newOrderIds))
+          } catch (error) {
+            console.error("Failed to update server order:", error)
+          }
+        }
+      }
+    },
+    [profile?.id],
+  )
+
   // Load channels for a specific server
   const loadServerChannels = useCallback(async (serverId: string) => {
     try {
@@ -414,6 +435,7 @@ function SolcordUIInner() {
         unreadDMCount={unreadDMCount}
         onServersUpdate={loadUserServers}
         onReorderServers={handleReorderServers}
+        onServerRemoved={handleServerRemoved}
       />
       <ChannelSidebar
         server={activeServer}

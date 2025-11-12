@@ -19,6 +19,7 @@ interface ServerListProps {
   unreadDMCount?: number
   onServersUpdate?: () => void
   onReorderServers?: (servers: Server[]) => void
+  onServerRemoved?: (serverId: string) => void
 }
 
 export function ServerList({
@@ -31,6 +32,7 @@ export function ServerList({
   unreadDMCount = 0,
   onServersUpdate,
   onReorderServers,
+  onServerRemoved,
 }: ServerListProps) {
   const { profile } = useProfile()
   const { getAccessToken } = usePrivy()
@@ -67,6 +69,10 @@ export function ServerList({
       const result = await tokenServerService.leaveServer(profile.id, server.id, authToken ?? undefined)
 
       if (result.success) {
+        if (onServerRemoved) {
+          onServerRemoved(server.id)
+        }
+
         // If leaving the currently active server, switch to Solcord
         if (activeServer.id === server.id) {
           const solcordServer = servers.find((s) => s.id === "solcord")
@@ -75,7 +81,7 @@ export function ServerList({
           }
         }
 
-        // Refresh the server list
+        // Refresh the server list in background to sync with database
         if (onServersUpdate) {
           onServersUpdate()
         }

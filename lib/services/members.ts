@@ -42,7 +42,6 @@ class MembersService {
         return members
       }
 
-      // For token servers, only show members who have joined that specific server
       const { data: serverMembers, error } = await supabase
         .from("server_memberships")
         .select(`
@@ -59,6 +58,7 @@ class MembersService {
           )
         `)
         .eq("server_id", serverId)
+        .eq("role", "member")
         .order("joined_at", { ascending: true })
 
       if (error) {

@@ -319,26 +319,28 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
                       <span className="font-medium">{serverPreview.userBalance.toLocaleString()} tokens</span>
                     </div>
 
-                    {serverPreview.hasMinimumTokens ? (
+                    {!serverPreview.exists && !serverPreview.hasMinimumTokens ? (
+                      <div className="text-yellow-400">
+                        <p>⚠ Server not yet created - You need 10,000+ tokens to create this server</p>
+                      </div>
+                    ) : serverPreview.exists && !serverPreview.hasMinimumTokens ? (
+                      <div className="text-blue-400">
+                        <p>ℹ You can view this server as a guest (read-only access to public channels)</p>
+                      </div>
+                    ) : serverPreview.hasMinimumTokens ? (
                       <div className="text-green-400">
                         {serverPreview.exists ? (
-                          <p>✓ You can join this server (10,000+ tokens required)</p>
+                          <p>✓ You can join this server as a member (10,000+ tokens required)</p>
                         ) : (
                           <p>✓ You can create this server (10,000+ tokens required)</p>
                         )}
                       </div>
-                    ) : (
-                      <div className="text-red-400">
-                        <p>
-                          ✗ You need at least 10,000 tokens to {serverPreview.exists ? "join" : "create"} this server
-                        </p>
-                      </div>
-                    )}
+                    ) : null}
                   </div>
 
                   <Button
                     onClick={handleJoinFromPreview}
-                    disabled={joiningTokenCA !== null || !serverPreview.hasMinimumTokens}
+                    disabled={joiningTokenCA !== null || (!serverPreview.exists && !serverPreview.hasMinimumTokens)}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-none disabled:bg-neutral-600 disabled:cursor-not-allowed"
                   >
                     {joiningTokenCA === tokenCA.trim() ? (
@@ -347,9 +349,15 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
                         {serverPreview.exists ? "Joining..." : "Creating..."}
                       </>
                     ) : serverPreview.exists ? (
-                      "Join Server"
-                    ) : (
+                      serverPreview.hasMinimumTokens ? (
+                        "Join Server"
+                      ) : (
+                        "View as Guest"
+                      )
+                    ) : serverPreview.hasMinimumTokens ? (
                       "Create & Join Server"
+                    ) : (
+                      "Cannot Create Server"
                     )}
                   </Button>
                 </div>
@@ -358,6 +366,7 @@ export function ServerSearchModal({ onClose }: ServerSearchModalProps) {
               <div className="text-xs text-neutral-500">
                 <p>Enter a Solana token contract address to find or create a server for that token community.</p>
                 <p className="mt-1">You need to hold at least 10,000 tokens to participate as a member.</p>
+                <p className="mt-1">If the server exists, you can view it as a guest with read-only access.</p>
               </div>
             </div>
           </div>
